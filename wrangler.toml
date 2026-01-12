@@ -1,0 +1,8 @@
+name = "lets-go-out"
+main = "backend/index.js"
+compatibility_date = "2024-12-01"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "lets_go_out_main"
+database_id = "068e4c99-59db-4d77-802c-2f066ec60ee8"
