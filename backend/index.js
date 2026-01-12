@@ -13,6 +13,40 @@ export default {
     }
 
     /* =========================
+       GET ALL OUTINGS
+       ========================= */
+    if (request.method === "GET" && url.pathname === "/outings") {
+      try {
+        const result = await env.DB.prepare(
+          `
+          SELECT *
+          FROM outings
+          ORDER BY created_at DESC
+          `
+        ).all();
+
+        return new Response(
+          JSON.stringify(result.results),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      } catch (err) {
+        return new Response(
+          JSON.stringify({
+            error: "Failed to fetch outings",
+            details: err.message
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+    }
+
+    /* =========================
        CREATE OUTING
        ========================= */
     if (request.method === "POST" && url.pathname === "/outings") {
@@ -30,7 +64,6 @@ export default {
           date_time
         } = body;
 
-        // Basic validation (MVP level)
         if (
           !host_user_id ||
           !title ||
@@ -50,7 +83,7 @@ export default {
           );
         }
 
-        const result = await env.DB.prepare(
+        await env.DB.prepare(
           `
           INSERT INTO outings (
             id,
@@ -85,18 +118,7 @@ export default {
           .run();
 
         return new Response(
-          JSON.stringify({
-            id: result.meta.last_row_id,
-            host_user_id,
-            title,
-            description,
-            outing_mode,
-            activity_type,
-            location,
-            virtual_link,
-            date_time,
-            status: "open"
-          }),
+          JSON.stringify({ message: "Outing created" }),
           {
             status: 201,
             headers: { "Content-Type": "application/json" }
@@ -121,7 +143,10 @@ export default {
        ========================= */
     return new Response(
       JSON.stringify({ error: "Not Found" }),
-      { status: 404, headers: { "Content-Type": "application/json" } }
+      {
+        status: 404,
+        headers: { "Content-Type": "application/json" }
+      }
     );
   }
 };
