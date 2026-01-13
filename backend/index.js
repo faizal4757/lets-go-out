@@ -139,6 +139,74 @@ export default {
     }
 
     /* =========================
+       CREATE INTEREST REQUEST
+       ========================= */
+    if (request.method === "POST" && url.pathname === "/interest_requests") {
+      try {
+        const body = await request.json();
+
+        const { outing_id, requester_user_id } = body;
+
+        if (!outing_id || !requester_user_id) {
+          return new Response(
+            JSON.stringify({
+              error: "outing_id and requester_user_id are required"
+            }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" }
+            }
+          );
+        }
+
+        await env.DB.prepare(
+          `
+          INSERT INTO interest_requests (
+            id,
+            outing_id,
+            requester_user_id,
+            status,
+            created_at
+          )
+          VALUES (
+            lower(hex(randomblob(16))),
+            ?, ?, ?, strftime('%s','now')
+          )
+          `
+        )
+          .bind(
+            outing_id,
+            requester_user_id,
+            "pending"
+          )
+          .run();
+
+        return new Response(
+          JSON.stringify({
+            outing_id,
+            requester_user_id,
+            status: "pending"
+          }),
+          {
+            status: 201,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      } catch (err) {
+        return new Response(
+          JSON.stringify({
+            error: "Failed to create interest request",
+            details: err.message
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+    }
+
+    /* =========================
        FALLBACK
        ========================= */
     return new Response(
