@@ -56,17 +56,7 @@ export default {
     ) {
       try {
         const parts = url.pathname.split("/");
-        const outing_id = parts[2]; // /outings/{id}/interest_requests
-
-        if (!outing_id) {
-          return new Response(
-            JSON.stringify({ error: "outing_id is required" }),
-            {
-              status: 400,
-              headers: { "Content-Type": "application/json" }
-            }
-          );
-        }
+        const outing_id = parts[2];
 
         const result = await env.DB.prepare(
           `
@@ -245,6 +235,66 @@ export default {
         return new Response(
           JSON.stringify({
             error: "Failed to create interest request",
+            details: err.message
+          }),
+          {
+            status: 500,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      }
+    }
+
+    /* =========================
+       ACCEPT / REJECT INTEREST REQUEST
+       ========================= */
+    if (
+      request.method === "PATCH" &&
+      url.pathname.startsWith("/interest_requests/")
+    ) {
+      try {
+        const parts = url.pathname.split("/");
+        const interest_request_id = parts[2];
+
+        const body = await request.json();
+        const { status } = body;
+
+        if (!["accepted", "rejected"].includes(status)) {
+          return new Response(
+            JSON.stringify({
+              error: "status must be 'accepted' or 'rejected'"
+            }),
+            {
+              status: 400,
+              headers: { "Content-Type": "application/json" }
+            }
+          );
+        }
+
+        await env.DB.prepare(
+          `
+          UPDATE interest_requests
+          SET status = ?
+          WHERE id = ?
+          `
+        )
+          .bind(status, interest_request_id)
+          .run();
+
+        return new Response(
+          JSON.stringify({
+            id: interest_request_id,
+            status
+          }),
+          {
+            status: 200,
+            headers: { "Content-Type": "application/json" }
+          }
+        );
+      } catch (err) {
+        return new Response(
+          JSON.stringify({
+            error: "Failed to update interest request",
             details: err.message
           }),
           {
