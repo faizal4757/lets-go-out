@@ -1,3 +1,12 @@
+const json = (data, status = 200) =>
+  new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
+
+const errorResponse = (message, status = 500, details = null) =>
+  json(details ? { error: message, details } : { error: message }, status);
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -6,10 +15,7 @@ export default {
        HEALTH CHECK
        ========================= */
     if (request.method === "GET" && url.pathname === "/health") {
-      return new Response(
-        JSON.stringify({ status: "ok" }),
-        { headers: { "Content-Type": "application/json" } }
-      );
+      return json({ status: "ok" });
     }
 
     /* =========================
@@ -17,37 +23,20 @@ export default {
        ========================= */
     if (request.method === "GET" && url.pathname === "/outings") {
       try {
-        const result = await env.DB.prepare(
-          `
+        const result = await env.DB.prepare(`
           SELECT *
           FROM outings
           ORDER BY created_at DESC
-          `
-        ).all();
+        `).all();
 
-        return new Response(
-          JSON.stringify(result.results),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
+        return json(result.results);
       } catch (err) {
-        return new Response(
-          JSON.stringify({
-            error: "Failed to fetch outings",
-            details: err.message
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
+        return errorResponse("Failed to fetch outings", 500, err.message);
       }
     }
 
     /* =========================
-       GET INTEREST REQUESTS FOR AN OUTING (HOST VIEW)
+       GET INTEREST REQUESTS (HOST VIEW)
        ========================= */
     if (
       request.method === "GET" &&
@@ -55,37 +44,23 @@ export default {
       url.pathname.endsWith("/interest_requests")
     ) {
       try {
-        const parts = url.pathname.split("/");
-        const outing_id = parts[2];
+        const outing_id = url.pathname.split("/")[2];
 
-        const result = await env.DB.prepare(
-          `
+        const result = await env.DB.prepare(`
           SELECT *
           FROM interest_requests
           WHERE outing_id = ?
           ORDER BY created_at ASC
-          `
-        )
+        `)
           .bind(outing_id)
           .all();
 
-        return new Response(
-          JSON.stringify(result.results),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
+        return json(result.results);
       } catch (err) {
-        return new Response(
-          JSON.stringify({
-            error: "Failed to fetch interest requests",
-            details: err.message
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" }
-          }
+        return errorResponse(
+          "Failed to fetch interest requests",
+          500,
+          err.message
         );
       }
     }
@@ -96,7 +71,6 @@ export default {
     if (request.method === "POST" && url.pathname === "/outings") {
       try {
         const body = await request.json();
-
         const {
           host_user_id,
           title,
@@ -115,20 +89,13 @@ export default {
           !activity_type ||
           !date_time
         ) {
-          return new Response(
-            JSON.stringify({
-              error:
-                "host_user_id, title, outing_mode, activity_type, date_time are required"
-            }),
-            {
-              status: 400,
-              headers: { "Content-Type": "application/json" }
-            }
+          return errorResponse(
+            "host_user_id, title, outing_mode, activity_type, date_time are required",
+            400
           );
         }
 
-        await env.DB.prepare(
-          `
+        await env.DB.prepare(`
           INSERT INTO outings (
             id,
             title,
@@ -146,8 +113,7 @@ export default {
             lower(hex(randomblob(16))),
             ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now')
           )
-          `
-        )
+        `)
           .bind(
             title,
             description ?? null,
@@ -161,24 +127,9 @@ export default {
           )
           .run();
 
-        return new Response(
-          JSON.stringify({ message: "Outing created" }),
-          {
-            status: 201,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
+        return json({ message: "Outing created" }, 201);
       } catch (err) {
-        return new Response(
-          JSON.stringify({
-            error: "Failed to create outing",
-            details: err.message
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
+        return errorResponse("Failed to create outing", 500, err.message);
       }
     }
 
@@ -191,19 +142,13 @@ export default {
         const { outing_id, requester_user_id } = body;
 
         if (!outing_id || !requester_user_id) {
-          return new Response(
-            JSON.stringify({
-              error: "outing_id and requester_user_id are required"
-            }),
-            {
-              status: 400,
-              headers: { "Content-Type": "application/json" }
-            }
+          return errorResponse(
+            "outing_id and requester_user_id are required",
+            400
           );
         }
 
-        await env.DB.prepare(
-          `
+        await env.DB.prepare(`
           INSERT INTO interest_requests (
             id,
             outing_id,
@@ -213,34 +158,21 @@ export default {
           )
           VALUES (
             lower(hex(randomblob(16))),
-            ?, ?, ?, strftime('%s','now')
+            ?, ?, 'pending', strftime('%s','now')
           )
-          `
-        )
-          .bind(outing_id, requester_user_id, "pending")
+        `)
+          .bind(outing_id, requester_user_id)
           .run();
 
-        return new Response(
-          JSON.stringify({
-            outing_id,
-            requester_user_id,
-            status: "pending"
-          }),
-          {
-            status: 201,
-            headers: { "Content-Type": "application/json" }
-          }
+        return json(
+          { outing_id, requester_user_id, status: "pending" },
+          201
         );
       } catch (err) {
-        return new Response(
-          JSON.stringify({
-            error: "Failed to create interest request",
-            details: err.message
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" }
-          }
+        return errorResponse(
+          "Failed to create interest request",
+          500,
+          err.message
         );
       }
     }
@@ -253,54 +185,39 @@ export default {
       url.pathname.startsWith("/interest_requests/")
     ) {
       try {
-        const parts = url.pathname.split("/");
-        const interest_request_id = parts[2];
-
+        const interest_request_id = url.pathname.split("/")[2];
         const body = await request.json();
         const { status } = body;
 
         if (!["accepted", "rejected"].includes(status)) {
-          return new Response(
-            JSON.stringify({
-              error: "status must be 'accepted' or 'rejected'"
-            }),
-            {
-              status: 400,
-              headers: { "Content-Type": "application/json" }
-            }
+          return errorResponse(
+            "status must be 'accepted' or 'rejected'",
+            400
           );
         }
 
-        await env.DB.prepare(
-          `
+        const result = await env.DB.prepare(`
           UPDATE interest_requests
           SET status = ?
           WHERE id = ?
-          `
-        )
+            AND status = 'pending'
+        `)
           .bind(status, interest_request_id)
           .run();
 
-        return new Response(
-          JSON.stringify({
-            id: interest_request_id,
-            status
-          }),
-          {
-            status: 200,
-            headers: { "Content-Type": "application/json" }
-          }
-        );
+        if (result.changes === 0) {
+          return errorResponse(
+            "Interest request not found or already decided",
+            409
+          );
+        }
+
+        return json({ id: interest_request_id, status });
       } catch (err) {
-        return new Response(
-          JSON.stringify({
-            error: "Failed to update interest request",
-            details: err.message
-          }),
-          {
-            status: 500,
-            headers: { "Content-Type": "application/json" }
-          }
+        return errorResponse(
+          "Failed to update interest request",
+          500,
+          err.message
         );
       }
     }
@@ -308,12 +225,6 @@ export default {
     /* =========================
        FALLBACK
        ========================= */
-    return new Response(
-      JSON.stringify({ error: "Not Found" }),
-      {
-        status: 404,
-        headers: { "Content-Type": "application/json" }
-      }
-    );
+    return errorResponse("Not Found", 404);
   }
 };
