@@ -4,25 +4,36 @@ const json = (data, status = 200) =>
     headers: { "Content-Type": "application/json" }
   });
 
-const errorResponse = (message, status = 500, details = null) =>
-  json(details ? { error: message, details } : { error: message }, status);
+const errorResponse = (message, status = 500) =>
+  json({ error: message }, status);
+
+const getUserId = (request) => {
+  const userId = request.headers.get("X-User-Id");
+  if (!userId) {
+    throw new Response(
+      JSON.stringify({ error: "Missing X-User-Id header" }),
+      { status: 401 }
+    );
+  }
+  return userId;
+};
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    /* =========================
-       HEALTH CHECK
-       ========================= */
-    if (request.method === "GET" && url.pathname === "/health") {
-      return json({ status: "ok" });
-    }
+    try {
+      /* =========================
+         HEALTH CHECK
+         ========================= */
+      if (request.method === "GET" && url.pathname === "/health") {
+        return json({ status: "ok" });
+      }
 
-    /* =========================
-       GET ALL OUTINGS
-       ========================= */
-    if (request.method === "GET" && url.pathname === "/outings") {
-      try {
+      /* =========================
+         GET ALL OUTINGS
+         ========================= */
+      if (request.method === "GET" && url.pathname === "/outings") {
         const result = await env.DB.prepare(`
           SELECT *
           FROM outings
@@ -30,49 +41,16 @@ export default {
         `).all();
 
         return json(result.results);
-      } catch (err) {
-        return errorResponse("Failed to fetch outings", 500, err.message);
       }
-    }
 
-    /* =========================
-       GET INTEREST REQUESTS (HOST VIEW)
-       ========================= */
-    if (
-      request.method === "GET" &&
-      url.pathname.startsWith("/outings/") &&
-      url.pathname.endsWith("/interest_requests")
-    ) {
-      try {
-        const outing_id = url.pathname.split("/")[2];
-
-        const result = await env.DB.prepare(`
-          SELECT *
-          FROM interest_requests
-          WHERE outing_id = ?
-          ORDER BY created_at ASC
-        `)
-          .bind(outing_id)
-          .all();
-
-        return json(result.results);
-      } catch (err) {
-        return errorResponse(
-          "Failed to fetch interest requests",
-          500,
-          err.message
-        );
-      }
-    }
-
-    /* =========================
-       CREATE OUTING
-       ========================= */
-    if (request.method === "POST" && url.pathname === "/outings") {
-      try {
+      /* =========================
+         CREATE OUTING (HOST)
+         ========================= */
+      if (request.method === "POST" && url.pathname === "/outings") {
+        const host_user_id = getUserId(request);
         const body = await request.json();
+
         const {
-          host_user_id,
           title,
           description,
           outing_mode,
@@ -82,15 +60,9 @@ export default {
           date_time
         } = body;
 
-        if (
-          !host_user_id ||
-          !title ||
-          !outing_mode ||
-          !activity_type ||
-          !date_time
-        ) {
+        if (!title || !outing_mode || !activity_type || !date_time) {
           return errorResponse(
-            "host_user_id, title, outing_mode, activity_type, date_time are required",
+            "title, outing_mode, activity_type, date_time are required",
             400
           );
         }
@@ -111,7 +83,7 @@ export default {
           )
           VALUES (
             lower(hex(randomblob(16))),
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, strftime('%s','now')
+            ?, ?, ?, ?, ?, ?, ?, ?, 'open', strftime('%s','now')
           )
         `)
           .bind(
@@ -122,30 +94,62 @@ export default {
             location ?? null,
             virtual_link ?? null,
             date_time,
-            host_user_id,
-            "open"
+            host_user_id
           )
           .run();
 
         return json({ message: "Outing created" }, 201);
-      } catch (err) {
-        return errorResponse("Failed to create outing", 500, err.message);
       }
-    }
 
-    /* =========================
-       CREATE INTEREST REQUEST
-       ========================= */
-    if (request.method === "POST" && url.pathname === "/interest_requests") {
-      try {
+      /* =========================
+         GET INTEREST REQUESTS (HOST ONLY)
+         ========================= */
+      if (
+        request.method === "GET" &&
+        url.pathname.startsWith("/outings/") &&
+        url.pathname.endsWith("/interest_requests")
+      ) {
+        const currentUser = getUserId(request);
+        const outing_id = url.pathname.split("/")[2];
+
+        const outing = await env.DB.prepare(`
+          SELECT host_user_id
+          FROM outings
+          WHERE id = ?
+        `)
+          .bind(outing_id)
+          .first();
+
+        if (!outing) {
+          return errorResponse("Outing not found", 404);
+        }
+
+        if (outing.host_user_id !== currentUser) {
+          return errorResponse("Forbidden", 403);
+        }
+
+        const result = await env.DB.prepare(`
+          SELECT *
+          FROM interest_requests
+          WHERE outing_id = ?
+          ORDER BY created_at ASC
+        `)
+          .bind(outing_id)
+          .all();
+
+        return json(result.results);
+      }
+
+      /* =========================
+         CREATE INTEREST REQUEST
+         ========================= */
+      if (request.method === "POST" && url.pathname === "/interest_requests") {
+        const requester_user_id = getUserId(request);
         const body = await request.json();
-        const { outing_id, requester_user_id } = body;
+        const { outing_id } = body;
 
-        if (!outing_id || !requester_user_id) {
-          return errorResponse(
-            "outing_id and requester_user_id are required",
-            400
-          );
+        if (!outing_id) {
+          return errorResponse("outing_id is required", 400);
         }
 
         await env.DB.prepare(`
@@ -168,23 +172,16 @@ export default {
           { outing_id, requester_user_id, status: "pending" },
           201
         );
-      } catch (err) {
-        return errorResponse(
-          "Failed to create interest request",
-          500,
-          err.message
-        );
       }
-    }
 
-    /* =========================
-       ACCEPT / REJECT INTEREST REQUEST
-       ========================= */
-    if (
-      request.method === "PATCH" &&
-      url.pathname.startsWith("/interest_requests/")
-    ) {
-      try {
+      /* =========================
+         ACCEPT / REJECT (HOST ONLY)
+         ========================= */
+      if (
+        request.method === "PATCH" &&
+        url.pathname.startsWith("/interest_requests/")
+      ) {
+        const currentUser = getUserId(request);
         const interest_request_id = url.pathname.split("/")[2];
         const body = await request.json();
         const { status } = body;
@@ -201,30 +198,29 @@ export default {
           SET status = ?
           WHERE id = ?
             AND status = 'pending'
+            AND outing_id IN (
+              SELECT id
+              FROM outings
+              WHERE host_user_id = ?
+            )
         `)
-          .bind(status, interest_request_id)
+          .bind(status, interest_request_id, currentUser)
           .run();
 
         if (result.changes === 0) {
           return errorResponse(
-            "Interest request not found or already decided",
+            "Not found, forbidden, or already decided",
             409
           );
         }
 
         return json({ id: interest_request_id, status });
-      } catch (err) {
-        return errorResponse(
-          "Failed to update interest request",
-          500,
-          err.message
-        );
       }
-    }
 
-    /* =========================
-       FALLBACK
-       ========================= */
-    return errorResponse("Not Found", 404);
+      return errorResponse("Not Found", 404);
+    } catch (err) {
+      if (err instanceof Response) return err;
+      return errorResponse("Internal Server Error", 500);
+    }
   }
 };
