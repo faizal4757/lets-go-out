@@ -25,4 +25,5 @@ lets-go-out is a platform where users can host an outing or activity and others 
 - Focused on intent, not endless interaction
 
 ## Status
-🚧 Under active development (Sprint 0)
+Backend MVP deployed to Cloudflare Workers with D1.
+Health check live.
