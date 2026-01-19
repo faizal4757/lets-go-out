@@ -18,3 +18,10 @@ async function apiRequest(path, options = {}) {
 
   return data;
 }
+window.createOuting = async function (payload) {
+  return apiRequest("/outings", {
+    method: "POST",
+    body: JSON.stringify(payload)
+  });
+};
+ 

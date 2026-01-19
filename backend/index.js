@@ -1,7 +1,16 @@
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, X-User-Id"
+};
+
 const json = (data, status = 200) =>
   new Response(JSON.stringify(data), {
     status,
-    headers: { "Content-Type": "application/json" }
+    headers: {
+      "Content-Type": "application/json",
+      ...corsHeaders
+    }
   });
 
 const errorResponse = (message, status = 500) =>
@@ -12,7 +21,7 @@ const getUserId = (request) => {
   if (!userId) {
     throw new Response(
       JSON.stringify({ error: "Missing X-User-Id header" }),
-      { status: 401 }
+      { status: 401, headers: corsHeaders }
     );
   }
   return userId;
@@ -21,6 +30,16 @@ const getUserId = (request) => {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
+
+    /* =========================
+       CORS PREFLIGHT
+       ========================= */
+    if (request.method === "OPTIONS") {
+      return new Response(null, {
+        status: 204,
+        headers: corsHeaders
+      });
+    }
 
     try {
       /* =========================
@@ -50,19 +69,20 @@ export default {
         const host_user_id = getUserId(request);
         const body = await request.json();
 
+        // FRONTEND → BACKEND MAPPING (AP-2)
         const {
           title,
-          description,
-          outing_mode,
           activity_type,
-          location,
-          virtual_link,
-          date_time
+          date_time,
+          location
         } = body;
 
-        if (!title || !outing_mode || !activity_type || !date_time) {
+        // For MVP, we hardcode outing_mode
+        const outing_mode = "in_person";
+
+        if (!title || !activity_type || !date_time) {
           return errorResponse(
-            "title, outing_mode, activity_type, date_time are required",
+            "title, activity_type, and date_time are required",
             400
           );
         }
@@ -83,16 +103,14 @@ export default {
           )
           VALUES (
             lower(hex(randomblob(16))),
-            ?, ?, ?, ?, ?, ?, ?, ?, 'open', strftime('%s','now')
+            ?, NULL, ?, ?, ?, NULL, ?, ?, 'open', strftime('%s','now')
           )
         `)
           .bind(
             title,
-            description ?? null,
             outing_mode,
             activity_type,
             location ?? null,
-            virtual_link ?? null,
             date_time,
             host_user_id
           )
@@ -175,7 +193,7 @@ export default {
       }
 
       /* =========================
-         ACCEPT / REJECT (HOST ONLY)
+         ACCEPT / REJECT REQUEST
          ========================= */
       if (
         request.method === "PATCH" &&

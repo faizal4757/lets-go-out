@@ -1,14 +1,39 @@
-<!DOCTYPE html>
-<html>
-<head>
-  <title>Lets Go Out</title>
-  <link rel="stylesheet" href="styles.css" />
-</head>
 <body>
   <h1>Lets Go Out</h1>
+
+  <h2>Create an outing</h2>
+
+  <form id="create-outing-form">
+    <div>
+      <label>Title</label><br />
+      <input type="text" id="title" required />
+    </div>
+
+    <div>
+      <label>Type</label><br />
+      <select id="type">
+        <option value="movie">Movie</option>
+        <option value="coffee">Coffee</option>
+        <option value="sports">Sports</option>
+      </select>
+    </div>
+
+    <div>
+      <label>Date & Time</label><br />
+      <input type="datetime-local" id="date_time" required />
+    </div>
+
+    <div>
+      <label>Location</label><br />
+      <input type="text" id="location" required />
+    </div>
+
+    <button type="submit">Create Outing</button>
+  </form>
+
+  <p id="message"></p>
 
   <script src="state.js"></script>
   <script src="api.js"></script>
   <script src="app.js"></script>
 </body>
-</html>
