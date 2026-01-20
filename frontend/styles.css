@@ -1,4 +1,63 @@
+/* Page background and base text */
 body {
+  background-color: #000;
+  color: #fff;
   font-family: sans-serif;
   padding: 20px;
+}
+
+/* Headings */
+h1, h2 {
+  color: #fff;
+}
+
+/* Form layout */
+form div {
+  margin-bottom: 12px;
+}
+
+/* Inputs and selects */
+input,
+select {
+  background-color: #111;
+  color: #fff;
+  border: 1px solid #444;
+  padding: 8px;
+  width: 250px;
+}
+
+/* Input focus */
+input:focus,
+select:focus {
+  outline: none;
+  border-color: #888;
+}
+
+/* Button styling */
+button {
+  background-color: #fff;
+  color: #000;
+  border: none;
+  padding: 8px 14px;
+  cursor: pointer;
+  font-weight: bold;
+}
+
+button:hover {
+  background-color: #ddd;
+}
+
+/* Message text */
+#message {
+  margin-top: 10px;
+}
+
+/* Outings list */
+ul {
+  margin-top: 10px;
+  padding-left: 20px;
+}
+
+li {
+  margin-bottom: 6px;
 }

@@ -1,3 +1,9 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Lets Go Out</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
 <body>
   <h1>Lets Go Out</h1>
 
@@ -25,7 +31,7 @@
 
     <div>
       <label>Location</label><br />
-      <input type="text" id="location" required />
+      <input type="text" id="location" />
     </div>
 
     <button type="submit">Create Outing</button>
@@ -33,7 +39,16 @@
 
   <p id="message"></p>
 
+  <hr />
+
+  <h2>Available outings</h2>
+
+  <ul id="outings-list">
+    <li>Loading outings...</li>
+  </ul>
+
   <script src="state.js"></script>
   <script src="api.js"></script>
   <script src="app.js"></script>
 </body>
+</html>
