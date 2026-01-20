@@ -21,19 +21,18 @@ form.addEventListener("submit", async (e) => {
     await createOuting(payload);
     messageEl.textContent = "Outing created successfully";
     form.reset();
-    loadOutings(); // refresh list
+    loadOutings();
   } catch (err) {
     messageEl.textContent = err.message;
   }
 });
 
 /* =========================
-   LOAD & DISPLAY OUTINGS (AP-3)
+   LOAD & DISPLAY OUTINGS (AP-3 + AP-4)
    ========================= */
 async function loadOutings() {
   try {
     const outings = await getOutings();
-
     outingsListEl.innerHTML = "";
 
     if (outings.length === 0) {
@@ -43,7 +42,25 @@ async function loadOutings() {
 
     outings.forEach((outing) => {
       const li = document.createElement("li");
-      li.textContent = `${outing.title} | ${outing.activity_type} | ${outing.location || "N/A"}`;
+
+      const text = document.createElement("span");
+      text.textContent = `${outing.title} | ${outing.activity_type} | ${outing.location || "N/A"}`;
+
+      const button = document.createElement("button");
+      button.textContent = "I'm interested";
+      button.style.marginLeft = "10px";
+
+      button.addEventListener("click", async () => {
+        try {
+          await expressInterest(outing.id);
+          alert("Interest sent!");
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      li.appendChild(text);
+      li.appendChild(button);
       outingsListEl.appendChild(li);
     });
   } catch (err) {

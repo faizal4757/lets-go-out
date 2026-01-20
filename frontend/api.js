@@ -20,7 +20,7 @@ async function apiRequest(path, options = {}) {
 }
 
 /* =========================
-   CREATE OUTING
+   CREATE OUTING (AP-2)
    ========================= */
 window.createOuting = async function (payload) {
   return apiRequest("/outings", {
@@ -30,10 +30,20 @@ window.createOuting = async function (payload) {
 };
 
 /* =========================
-   GET OUTINGS
+   GET OUTINGS (AP-3)
    ========================= */
 window.getOutings = async function () {
   return apiRequest("/outings", {
     method: "GET"
+  });
+};
+
+/* =========================
+   EXPRESS INTEREST (AP-4)
+   ========================= */
+window.expressInterest = async function (outingId) {
+  return apiRequest("/interest_requests", {
+    method: "POST",
+    body: JSON.stringify({ outing_id: outingId })
   });
 };
