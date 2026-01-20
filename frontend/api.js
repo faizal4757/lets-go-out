@@ -20,30 +20,40 @@ async function apiRequest(path, options = {}) {
 }
 
 /* =========================
-   CREATE OUTING (AP-2)
+   AP-2: CREATE OUTING
    ========================= */
-window.createOuting = async function (payload) {
-  return apiRequest("/outings", {
+window.createOuting = async (payload) =>
+  apiRequest("/outings", {
     method: "POST",
     body: JSON.stringify(payload)
   });
-};
 
 /* =========================
-   GET OUTINGS (AP-3)
+   AP-3: GET OUTINGS
    ========================= */
-window.getOutings = async function () {
-  return apiRequest("/outings", {
-    method: "GET"
-  });
-};
+window.getOutings = async () =>
+  apiRequest("/outings");
 
 /* =========================
-   EXPRESS INTEREST (AP-4)
+   AP-4: EXPRESS INTEREST
    ========================= */
-window.expressInterest = async function (outingId) {
-  return apiRequest("/interest_requests", {
+window.expressInterest = async (outingId) =>
+  apiRequest("/interest_requests", {
     method: "POST",
     body: JSON.stringify({ outing_id: outingId })
   });
-};
+
+/* =========================
+   AP-5: GET INTEREST REQUESTS
+   ========================= */
+window.getInterestRequests = async (outingId) =>
+  apiRequest(`/outings/${outingId}/interest_requests`);
+
+/* =========================
+   AP-5: UPDATE REQUEST STATUS
+   ========================= */
+window.updateInterestStatus = async (requestId, status) =>
+  apiRequest(`/interest_requests/${requestId}`, {
+    method: "PATCH",
+    body: JSON.stringify({ status })
+  });

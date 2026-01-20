@@ -5,12 +5,7 @@ body {
   padding: 20px;
 }
 
-form div {
-  margin-bottom: 10px;
-}
-
-input,
-select {
+input, select {
   background-color: #111;
   color: #fff;
   border: 1px solid #444;
@@ -18,19 +13,9 @@ select {
 }
 
 button {
-  background-color: #fff;
-  color: #000;
-  border: none;
-  padding: 6px 12px;
+  margin-left: 5px;
+  padding: 5px 10px;
   cursor: pointer;
-}
-
-button:hover {
-  background-color: #ddd;
-}
-
-ul {
-  margin-top: 10px;
 }
 
 li {

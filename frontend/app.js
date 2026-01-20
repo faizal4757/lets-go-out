@@ -3,9 +3,10 @@ console.log("Frontend MVP loaded");
 const form = document.getElementById("create-outing-form");
 const messageEl = document.getElementById("message");
 const outingsListEl = document.getElementById("outings-list");
+const requestsListEl = document.getElementById("requests-list");
 
 /* =========================
-   CREATE OUTING (AP-2)
+   AP-2: CREATE OUTING
    ========================= */
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -28,43 +29,82 @@ form.addEventListener("submit", async (e) => {
 });
 
 /* =========================
-   LOAD & DISPLAY OUTINGS (AP-3 + AP-4)
+   AP-3 + AP-4 + AP-5: LOAD OUTINGS
    ========================= */
 async function loadOutings() {
-  try {
-    const outings = await getOutings();
-    outingsListEl.innerHTML = "";
+  outingsListEl.innerHTML = "";
+  const outings = await getOutings();
 
-    if (outings.length === 0) {
-      outingsListEl.innerHTML = "<li>No outings yet</li>";
+  outings.forEach((outing) => {
+    const li = document.createElement("li");
+    li.textContent = `${outing.title} | ${outing.activity_type}`;
+
+    const interestBtn = document.createElement("button");
+    interestBtn.textContent = "I'm interested";
+    interestBtn.style.marginLeft = "10px";
+
+    interestBtn.onclick = async () => {
+      await expressInterest(outing.id);
+      alert("Interest sent");
+    };
+
+    const viewRequestsBtn = document.createElement("button");
+    viewRequestsBtn.textContent = "View requests";
+    viewRequestsBtn.style.marginLeft = "10px";
+
+    viewRequestsBtn.onclick = () => loadRequests(outing.id);
+
+    li.appendChild(interestBtn);
+    li.appendChild(viewRequestsBtn);
+    outingsListEl.appendChild(li);
+  });
+}
+
+/* =========================
+   AP-5: LOAD INTEREST REQUESTS
+   ========================= */
+async function loadRequests(outingId) {
+  requestsListEl.innerHTML = "";
+
+  try {
+    const requests = await getInterestRequests(outingId);
+
+    if (requests.length === 0) {
+      requestsListEl.innerHTML = "<li>No requests yet</li>";
       return;
     }
 
-    outings.forEach((outing) => {
+    requests.forEach((req) => {
       const li = document.createElement("li");
+      li.textContent = `User: ${req.requester_user_id} | Status: ${req.status}`;
 
-      const text = document.createElement("span");
-      text.textContent = `${outing.title} | ${outing.activity_type} | ${outing.location || "N/A"}`;
+      if (req.status === "pending") {
+        const acceptBtn = document.createElement("button");
+        acceptBtn.textContent = "Accept";
+        acceptBtn.style.marginLeft = "10px";
 
-      const button = document.createElement("button");
-      button.textContent = "I'm interested";
-      button.style.marginLeft = "10px";
+        const rejectBtn = document.createElement("button");
+        rejectBtn.textContent = "Reject";
+        rejectBtn.style.marginLeft = "5px";
 
-      button.addEventListener("click", async () => {
-        try {
-          await expressInterest(outing.id);
-          alert("Interest sent!");
-        } catch (err) {
-          alert(err.message);
-        }
-      });
+        acceptBtn.onclick = async () => {
+          await updateInterestStatus(req.id, "accepted");
+          loadRequests(outingId);
+        };
 
-      li.appendChild(text);
-      li.appendChild(button);
-      outingsListEl.appendChild(li);
+        rejectBtn.onclick = async () => {
+          await updateInterestStatus(req.id, "rejected");
+          loadRequests(outingId);
+        };
+
+        li.appendChild(acceptBtn);
+        li.appendChild(rejectBtn);
+      }
+
+      requestsListEl.appendChild(li);
     });
   } catch (err) {
-    outingsListEl.innerHTML = "<li>Failed to load outings</li>";
+    requestsListEl.innerHTML = "<li>Not authorized or error</li>";
   }
 }
 
