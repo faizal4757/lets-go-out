@@ -5,17 +5,15 @@ body {
   padding: 20px;
 }
 
-input, select {
-  background-color: #111;
-  color: #fff;
-  border: 1px solid #444;
-  padding: 6px;
-}
-
 button {
-  margin-left: 5px;
+  margin-left: 6px;
   padding: 5px 10px;
   cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 li {

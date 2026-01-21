@@ -5,8 +5,25 @@ const messageEl = document.getElementById("message");
 const outingsListEl = document.getElementById("outings-list");
 const requestsListEl = document.getElementById("requests-list");
 
+const userSelector = document.getElementById("user-selector");
+const currentUserLabel = document.getElementById("current-user-label");
+
 /* =========================
-   AP-2: CREATE OUTING
+   USER SWITCHING (AP-6)
+   ========================= */
+function updateUserUI() {
+  currentUserLabel.textContent = window.currentUser;
+}
+
+userSelector.addEventListener("change", () => {
+  setCurrentUser(userSelector.value);
+  updateUserUI();
+  loadOutings();
+  requestsListEl.innerHTML = "<li>Select one of your outings</li>";
+});
+
+/* =========================
+   CREATE OUTING (AP-2)
    ========================= */
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
@@ -29,7 +46,7 @@ form.addEventListener("submit", async (e) => {
 });
 
 /* =========================
-   AP-3 + AP-4 + AP-5: LOAD OUTINGS
+   LOAD OUTINGS (AP-3 → AP-7)
    ========================= */
 async function loadOutings() {
   outingsListEl.innerHTML = "";
@@ -37,31 +54,39 @@ async function loadOutings() {
 
   outings.forEach((outing) => {
     const li = document.createElement("li");
+
     li.textContent = `${outing.title} | ${outing.activity_type}`;
 
-    const interestBtn = document.createElement("button");
-    interestBtn.textContent = "I'm interested";
-    interestBtn.style.marginLeft = "10px";
+    /* HOST VIEW */
+    if (outing.host_user_id === window.currentUser) {
+      const viewRequestsBtn = document.createElement("button");
+      viewRequestsBtn.textContent = "View requests";
+      viewRequestsBtn.style.marginLeft = "10px";
+      viewRequestsBtn.onclick = () => loadRequests(outing.id);
+      li.appendChild(viewRequestsBtn);
+    }
 
-    interestBtn.onclick = async () => {
-      await expressInterest(outing.id);
-      alert("Interest sent");
-    };
+    /* GUEST VIEW */
+    if (outing.host_user_id !== window.currentUser) {
+      const interestBtn = document.createElement("button");
+      interestBtn.textContent = "I'm interested";
+      interestBtn.style.marginLeft = "10px";
 
-    const viewRequestsBtn = document.createElement("button");
-    viewRequestsBtn.textContent = "View requests";
-    viewRequestsBtn.style.marginLeft = "10px";
+      interestBtn.onclick = async () => {
+        await expressInterest(outing.id);
+        interestBtn.disabled = true;
+        interestBtn.textContent = "Interest sent";
+      };
 
-    viewRequestsBtn.onclick = () => loadRequests(outing.id);
+      li.appendChild(interestBtn);
+    }
 
-    li.appendChild(interestBtn);
-    li.appendChild(viewRequestsBtn);
     outingsListEl.appendChild(li);
   });
 }
 
 /* =========================
-   AP-5: LOAD INTEREST REQUESTS
+   LOAD INTEREST REQUESTS (AP-5)
    ========================= */
 async function loadRequests(outingId) {
   requestsListEl.innerHTML = "";
@@ -81,11 +106,9 @@ async function loadRequests(outingId) {
       if (req.status === "pending") {
         const acceptBtn = document.createElement("button");
         acceptBtn.textContent = "Accept";
-        acceptBtn.style.marginLeft = "10px";
 
         const rejectBtn = document.createElement("button");
         rejectBtn.textContent = "Reject";
-        rejectBtn.style.marginLeft = "5px";
 
         acceptBtn.onclick = async () => {
           await updateInterestStatus(req.id, "accepted");
@@ -103,12 +126,13 @@ async function loadRequests(outingId) {
 
       requestsListEl.appendChild(li);
     });
-  } catch (err) {
-    requestsListEl.innerHTML = "<li>Not authorized or error</li>";
+  } catch {
+    requestsListEl.innerHTML = "<li>Not authorized</li>";
   }
 }
 
 /* =========================
    INITIAL LOAD
    ========================= */
+updateUserUI();
 loadOutings();
