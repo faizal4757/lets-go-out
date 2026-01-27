@@ -4,6 +4,7 @@
   <title>Lets Go Out</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
+
 <body>
   <h1>Lets Go Out</h1>
 
@@ -19,6 +20,9 @@
       <option value="user_3">user_3</option>
     </select>
   </div>
+
+  <!-- AP-7: Global backend error display -->
+  <p id="global-error" class="error hidden"></p>
 
   <hr />
 
@@ -52,7 +56,7 @@
     <button type="submit">Create Outing</button>
   </form>
 
-  <p id="message"></p>
+  <p id="message" class="success hidden"></p>
 
   <hr />
 

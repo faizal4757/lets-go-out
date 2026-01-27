@@ -1,16 +1,53 @@
+/**
+ * Frontend entry point
+ * Handles UI rendering, user switching, and backend interactions
+ */
 console.log("Frontend MVP loaded");
+
+/* =========================================================
+   DOM REFERENCES
+   ========================================================= */
 
 const form = document.getElementById("create-outing-form");
 const messageEl = document.getElementById("message");
+const errorEl = document.getElementById("global-error");
+
 const outingsListEl = document.getElementById("outings-list");
 const requestsListEl = document.getElementById("requests-list");
 
 const userSelector = document.getElementById("user-selector");
 const currentUserLabel = document.getElementById("current-user-label");
 
-/* =========================
+/* =========================================================
+   HELPER FUNCTIONS (AP-7)
+   ========================================================= */
+
+/** Show backend error message */
+function showError(message) {
+  errorEl.textContent = message;
+  errorEl.classList.remove("hidden");
+}
+
+/** Clear error message */
+function clearError() {
+  errorEl.textContent = "";
+  errorEl.classList.add("hidden");
+}
+
+/** Show success message */
+function showSuccess(message) {
+  messageEl.textContent = message;
+  messageEl.classList.remove("hidden");
+
+  setTimeout(() => {
+    messageEl.classList.add("hidden");
+  }, 3000);
+}
+
+/* =========================================================
    USER SWITCHING (AP-6)
-   ========================= */
+   ========================================================= */
+
 function updateUserUI() {
   currentUserLabel.textContent = window.currentUser;
 }
@@ -18,15 +55,18 @@ function updateUserUI() {
 userSelector.addEventListener("change", () => {
   setCurrentUser(userSelector.value);
   updateUserUI();
+  clearError();
   loadOutings();
   requestsListEl.innerHTML = "<li>Select one of your outings</li>";
 });
 
-/* =========================
-   CREATE OUTING (AP-2)
-   ========================= */
+/* =========================================================
+   CREATE OUTING (AP-2 + AP-7)
+   ========================================================= */
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
+  clearError();
 
   const payload = {
     title: document.getElementById("title").value,
@@ -37,59 +77,89 @@ form.addEventListener("submit", async (e) => {
 
   try {
     await createOuting(payload);
-    messageEl.textContent = "Outing created successfully";
+    showSuccess("Outing created successfully");
     form.reset();
     loadOutings();
   } catch (err) {
-    messageEl.textContent = err.message;
+    showError(err.message);
   }
 });
 
-/* =========================
+/* =========================================================
    LOAD OUTINGS (AP-3 → AP-7)
-   ========================= */
+   ========================================================= */
+
 async function loadOutings() {
   outingsListEl.innerHTML = "";
-  const outings = await getOutings();
+  clearError();
 
-  outings.forEach((outing) => {
-    const li = document.createElement("li");
+  try {
+    const outings = await getOutings();
 
-    li.textContent = `${outing.title} | ${outing.activity_type}`;
+    outings.forEach((outing) => {
+      const li = document.createElement("li");
+      li.textContent = `${outing.title} | ${outing.activity_type}`;
 
-    /* HOST VIEW */
-    if (outing.host_user_id === window.currentUser) {
-      const viewRequestsBtn = document.createElement("button");
-      viewRequestsBtn.textContent = "View requests";
-      viewRequestsBtn.style.marginLeft = "10px";
-      viewRequestsBtn.onclick = () => loadRequests(outing.id);
-      li.appendChild(viewRequestsBtn);
-    }
+      /* ---------- HOST VIEW ---------- */
+      if (outing.host_user_id === window.currentUser) {
+        const viewBtn = document.createElement("button");
+        viewBtn.textContent = "View requests";
+        viewBtn.onclick = () => loadRequests(outing.id);
+        li.appendChild(viewBtn);
+      }
 
-    /* GUEST VIEW */
-    if (outing.host_user_id !== window.currentUser) {
-      const interestBtn = document.createElement("button");
-      interestBtn.textContent = "I'm interested";
-      interestBtn.style.marginLeft = "10px";
+      /* ---------- GUEST VIEW ---------- */
+      if (outing.host_user_id !== window.currentUser) {
+        const interestBtn = document.createElement("button");
 
-      interestBtn.onclick = async () => {
-        await expressInterest(outing.id);
-        interestBtn.disabled = true;
-        interestBtn.textContent = "Interest sent";
-      };
+        const status = outing.current_user_interest_status;
 
-      li.appendChild(interestBtn);
-    }
+        if (!status) {
+          // No request yet
+          interestBtn.textContent = "I'm interested";
 
-    outingsListEl.appendChild(li);
-  });
+          interestBtn.onclick = async () => {
+            clearError();
+            try {
+              await expressInterest(outing.id);
+              interestBtn.textContent = "Awaiting host response";
+              interestBtn.disabled = true;
+              interestBtn.classList.add("pending");
+            } catch (err) {
+              showError(err.message);
+            }
+          };
+        } else if (status === "pending") {
+          interestBtn.textContent = "Awaiting host response";
+          interestBtn.disabled = true;
+          interestBtn.classList.add("pending");
+        } else if (status === "accepted") {
+          interestBtn.textContent = "Request accepted";
+          interestBtn.disabled = true;
+          interestBtn.classList.add("accepted");
+        } else if (status === "rejected") {
+          interestBtn.textContent = "Request rejected";
+          interestBtn.disabled = true;
+          interestBtn.classList.add("rejected");
+        }
+
+        li.appendChild(interestBtn);
+      }
+
+      outingsListEl.appendChild(li);
+    });
+  } catch (err) {
+    showError(err.message);
+  }
 }
 
-/* =========================
-   LOAD INTEREST REQUESTS (AP-5)
-   ========================= */
+/* =========================================================
+   LOAD INTEREST REQUESTS (AP-5 + AP-7)
+   ========================================================= */
+
 async function loadRequests(outingId) {
   requestsListEl.innerHTML = "";
+  clearError();
 
   try {
     const requests = await getInterestRequests(outingId);
@@ -111,13 +181,23 @@ async function loadRequests(outingId) {
         rejectBtn.textContent = "Reject";
 
         acceptBtn.onclick = async () => {
-          await updateInterestStatus(req.id, "accepted");
-          loadRequests(outingId);
+          clearError();
+          try {
+            await updateInterestStatus(req.id, "accepted");
+            loadRequests(outingId);
+          } catch (err) {
+            showError(err.message);
+          }
         };
 
         rejectBtn.onclick = async () => {
-          await updateInterestStatus(req.id, "rejected");
-          loadRequests(outingId);
+          clearError();
+          try {
+            await updateInterestStatus(req.id, "rejected");
+            loadRequests(outingId);
+          } catch (err) {
+            showError(err.message);
+          }
         };
 
         li.appendChild(acceptBtn);
@@ -126,13 +206,14 @@ async function loadRequests(outingId) {
 
       requestsListEl.appendChild(li);
     });
-  } catch {
-    requestsListEl.innerHTML = "<li>Not authorized</li>";
+  } catch (err) {
+    showError(err.message);
   }
 }
 
-/* =========================
+/* =========================================================
    INITIAL LOAD
-   ========================= */
+   ========================================================= */
+
 updateUserUI();
 loadOutings();

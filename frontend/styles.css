@@ -1,21 +1,78 @@
+/* ------------------------------
+   Global styles
+   ------------------------------ */
 body {
   background-color: #000;
   color: #fff;
-  font-family: sans-serif;
+  font-family: Arial, sans-serif;
   padding: 20px;
 }
 
+/* ------------------------------
+   Buttons
+   ------------------------------ */
 button {
-  margin-left: 6px;
-  padding: 5px 10px;
+  background-color: #ffffff;
+  color: #000000;
+  border: none;
+  border-radius: 4px;
+  padding: 6px 12px;
+  margin-left: 10px;
+  font-size: 14px;
   cursor: pointer;
 }
 
-button:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
+button:hover:not(:disabled) {
+  opacity: 0.85;
 }
 
+/* Override browser disabled dimming */
+button:disabled {
+  cursor: not-allowed;
+  opacity: 1;
+}
+
+/* ------------------------------
+   Button states
+   ------------------------------ */
+button.pending {
+  background-color: #555;
+  color: #ffffff;
+}
+
+button.accepted {
+  background-color: #2ecc71;
+  color: #000000;
+}
+
+button.rejected {
+  background-color: #e74c3c;
+  color: #ffffff;
+}
+
+/* ------------------------------
+   Lists
+   ------------------------------ */
 li {
-  margin-bottom: 8px;
+  margin-bottom: 10px;
+}
+
+/* ------------------------------
+   Messages
+   ------------------------------ */
+.error {
+  color: #ff6b6b;
+  margin-bottom: 12px;
+}
+
+.success {
+  color: #4cd137;
+  margin-top: 10px;
+}
+
+/* ------------------------------
+   Utility
+   ------------------------------ */
+.hidden {
+  display: none;
 }
