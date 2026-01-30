@@ -2,7 +2,10 @@
  * Base URL of the deployed backend API
  * This points to the Cloudflare Workers backend
  */
-const API_BASE_URL = "https://lets-go-out.lets-go-out-api.workers.dev";
+const API_BASE_URL =
+  location.hostname === "localhost" || location.hostname === "127.0.0.1"
+    ? "http://127.0.0.1:8787"
+    : "https://lets-go-out.lets-go-out-api.workers.dev";
 
 /**
  * Generic API request helper
@@ -98,3 +101,9 @@ window.updateInterestStatus = (requestId, status) =>
     method: "PATCH",
     body: JSON.stringify({ status })
   });
+
+/* =========================================================
+   AP-15: Fetch my interest requests (Guest view)
+   ========================================================= */
+window.getMyInterestRequests = () =>
+  apiRequest("/interest_requests");

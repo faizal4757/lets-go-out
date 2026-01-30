@@ -3,6 +3,7 @@
  * Handles UI rendering, user switching, and backend interactions
  */
 console.log("Frontend MVP loaded");
+let isInitialLoad = true;
 
 /* =========================================================
    DOM REFERENCES
@@ -14,9 +15,16 @@ const errorEl = document.getElementById("global-error");
 
 const outingsListEl = document.getElementById("outings-list");
 const requestsListEl = document.getElementById("requests-list");
+const myRequestsListEl = document.getElementById("my-requests-list");
 
 const userSelector = document.getElementById("user-selector");
 const currentUserLabel = document.getElementById("current-user-label");
+
+/* =========================================================
+   Global Map
+   ========================================================= */
+
+let myInterestStatusByOuting = {};
 
 /* =========================================================
    HELPER FUNCTIONS (AP-7)
@@ -24,9 +32,11 @@ const currentUserLabel = document.getElementById("current-user-label");
 
 /** Show backend error message */
 function showError(message) {
+  if (isInitialLoad) return; // suppress errors on initial load
   errorEl.textContent = message;
   errorEl.classList.remove("hidden");
 }
+
 
 /** Clear error message */
 function clearError() {
@@ -43,6 +53,27 @@ function showSuccess(message) {
     messageEl.classList.add("hidden");
   }, 3000);
 }
+/* =========================================================
+   AP-15: Status → UI mapping
+   ========================================================= */
+
+const STATUS_UI = {
+  pending: {
+    label: "Pending",
+    message: "Waiting for host decision",
+    className: "pending"
+  },
+  accepted: {
+    label: "Accepted",
+    message: "You’re in. See you there.",
+    className: "accepted"
+  },
+  rejected: {
+    label: "Rejected",
+    message: "This outing didn’t work out.",
+    className: "rejected"
+  }
+};
 
 /* =========================================================
    USER SWITCHING (AP-6)
@@ -52,13 +83,17 @@ function updateUserUI() {
   currentUserLabel.textContent = window.currentUser;
 }
 
-userSelector.addEventListener("change", () => {
+userSelector.addEventListener("change", async () => {
   setCurrentUser(userSelector.value);
   updateUserUI();
   clearError();
-  loadOutings();
+
+  await loadMyRequests(); // rebuild interest state
+  await loadOutings();    // render correctly
+
   requestsListEl.innerHTML = "<li>Select one of your outings</li>";
 });
+
 
 /* =========================================================
    CREATE OUTING (AP-2 + AP-7)
@@ -112,7 +147,7 @@ async function loadOutings() {
       if (outing.host_user_id !== window.currentUser) {
         const interestBtn = document.createElement("button");
 
-        const status = outing.current_user_interest_status;
+        const status = myInterestStatusByOuting[outing.id];
 
         if (!status) {
           // No request yet
@@ -122,13 +157,17 @@ async function loadOutings() {
             clearError();
             try {
               await expressInterest(outing.id);
+
               interestBtn.textContent = "Awaiting host response";
               interestBtn.disabled = true;
               interestBtn.classList.add("pending");
+
+              loadMyRequests(); // immediately reflect in AP-15 section
             } catch (err) {
               showError(err.message);
             }
           };
+
         } else if (status === "pending") {
           interestBtn.textContent = "Awaiting host response";
           interestBtn.disabled = true;
@@ -185,6 +224,7 @@ async function loadRequests(outingId) {
           try {
             await updateInterestStatus(req.id, "accepted");
             loadRequests(outingId);
+            loadMyRequests(); // keep guest state in sync
           } catch (err) {
             showError(err.message);
           }
@@ -210,10 +250,59 @@ async function loadRequests(outingId) {
     showError(err.message);
   }
 }
+/* =========================================================
+   AP-15: Load my interest requests (Guest)
+   ========================================================= */
+
+async function loadMyRequests() {
+  myRequestsListEl.innerHTML = "";
+  clearError();
+
+  try {
+    const requests = await getMyInterestRequests();
+    myInterestStatusByOuting = {};
+      requests.forEach(req => {
+        myInterestStatusByOuting[req.outing_id] = req.status;
+      });
+
+    requests.sort((a, b) => b.created_at - a.created_at);
+
+    if (requests.length === 0) {
+      myRequestsListEl.innerHTML = "<li>No requests yet</li>";
+      return;
+    }
+
+    requests.forEach((req) => {
+      const li = document.createElement("li");
+
+      const ui = STATUS_UI[req.status];
+
+      li.innerHTML = `
+        <strong>${req.title}</strong><br/>
+        ${req.activity_type} | ${req.date_time}<br/>
+        ${req.location || ""}<br/>
+        <span class="${ui.className}">
+          ${ui.label}: ${ui.message}
+        </span>
+      `;
+
+      myRequestsListEl.appendChild(li);
+    });
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 
 /* =========================================================
    INITIAL LOAD
    ========================================================= */
 
-updateUserUI();
-loadOutings();
+async function initApp() {
+  updateUserUI();
+  await loadMyRequests(); // MUST come first
+  await loadOutings();    // uses interest state
+  isInitialLoad = false;
+}
+
+initApp();
