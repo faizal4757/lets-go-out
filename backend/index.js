@@ -191,6 +191,33 @@ export default {
           201
         );
       }
+      /* =========================
+   GET MY INTEREST REQUESTS (GUEST)
+   ========================= */
+        if (request.method === "GET" && url.pathname === "/interest_requests") {
+          const requester_user_id = getUserId(request);
+
+          const result = await env.DB.prepare(`
+            SELECT
+              ir.id,
+              ir.outing_id,
+              ir.status,
+              ir.created_at,
+              o.title,
+              o.activity_type,
+              o.date_time,
+              o.location
+            FROM interest_requests ir
+            JOIN outings o ON ir.outing_id = o.id
+            WHERE ir.requester_user_id = ?
+            ORDER BY ir.created_at DESC
+          `)
+            .bind(requester_user_id)
+            .all();
+
+          return json(result.results);
+        }
+
 
       /* =========================
          ACCEPT / REJECT REQUEST
