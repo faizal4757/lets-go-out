@@ -107,3 +107,12 @@ window.updateInterestStatus = (requestId, status) =>
    ========================================================= */
 window.getMyInterestRequests = () =>
   apiRequest("/interest_requests");
+
+/* =========================================================
+   AP-17: Close outing (Host)
+   ========================================================= */
+window.closeOuting = (outingId) =>
+  apiRequest(`/outings/${outingId}/close`, {
+    method: "PATCH"
+  });
+

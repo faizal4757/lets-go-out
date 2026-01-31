@@ -21,6 +21,7 @@ CREATE TABLE IF NOT EXISTS outings (
   date_time INTEGER NOT NULL,
   host_user_id TEXT NOT NULL,
   status TEXT NOT NULL,
+  is_closed INTEGER DEFAULT 0, 
   created_at INTEGER NOT NULL,
   FOREIGN KEY (host_user_id) REFERENCES users(id)
 );

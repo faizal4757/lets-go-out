@@ -50,14 +50,27 @@ export default {
       }
 
       /* =========================
-         GET ALL OUTINGS
-         ========================= */
+        GET ALL OUTINGS (FEED) ✅ AP-17
+        ========================= */
       if (request.method === "GET" && url.pathname === "/outings") {
+        const currentUser = getUserId(request);
+
         const result = await env.DB.prepare(`
-          SELECT *
-          FROM outings
-          ORDER BY created_at DESC
-        `).all();
+          SELECT o.*
+          FROM outings o
+          LEFT JOIN interest_requests ir
+            ON o.id = ir.outing_id
+            AND ir.requester_user_id = ?
+
+          WHERE
+            COALESCE(o.is_closed, 0) = 0
+            OR ir.requester_user_id IS NOT NULL
+            OR o.host_user_id = ?
+
+          ORDER BY o.created_at DESC
+        `)
+          .bind(currentUser, currentUser) // ✅ bind twice
+          .all();
 
         return json(result.results);
       }
@@ -99,11 +112,12 @@ export default {
             date_time,
             host_user_id,
             status,
+            is_closed,
             created_at
           )
           VALUES (
             lower(hex(randomblob(16))),
-            ?, NULL, ?, ?, ?, NULL, ?, ?, 'open', strftime('%s','now')
+            ?, NULL, ?, ?, ?, NULL, ?, ?, 'open', 0, strftime('%s','now')
           )
         `)
           .bind(
@@ -117,6 +131,44 @@ export default {
           .run();
 
         return json({ message: "Outing created" }, 201);
+      }
+      /* =========================
+        CLOSE OUTING (HOST ONLY)  ✅ AP-17
+        ========================= */
+      if (
+        request.method === "PATCH" &&
+        url.pathname.startsWith("/outings/") &&
+        url.pathname.endsWith("/close")
+      ) {
+        const host_user_id = getUserId(request);
+        const outing_id = url.pathname.split("/")[2];
+
+        // 1. Verify outing exists + belongs to host
+        const outing = await env.DB.prepare(`
+          SELECT * FROM outings
+          WHERE id = ?
+        `)
+          .bind(outing_id)
+          .first();
+
+        if (!outing) {
+          return errorResponse("Outing not found", 404);
+        }
+
+        if (outing.host_user_id !== host_user_id) {
+          return errorResponse("Forbidden", 403);
+        }
+
+        // 2. Mark outing as closed
+        await env.DB.prepare(`
+          UPDATE outings
+          SET is_closed = 1
+          WHERE id = ?
+        `)
+          .bind(outing_id)
+          .run();
+
+        return json({ message: "Outing closed successfully" });
       }
 
       /* =========================
@@ -162,13 +214,33 @@ export default {
          CREATE INTEREST REQUEST
          ========================= */
       if (request.method === "POST" && url.pathname === "/interest_requests") {
-        const requester_user_id = getUserId(request);
-        const body = await request.json();
-        const { outing_id } = body;
+      const requester_user_id = getUserId(request);
+      const body = await request.json();
+      const { outing_id } = body;
 
-        if (!outing_id) {
-          return errorResponse("outing_id is required", 400);
-        }
+      if (!outing_id) {
+        return errorResponse("outing_id is required", 400);
+      }
+
+      // ✅ AP-17: Block interest if outing is closed
+      const outing = await env.DB.prepare(`
+        SELECT is_closed
+        FROM outings
+        WHERE id = ?
+      `)
+        .bind(outing_id)
+        .first();
+
+      if (!outing) {
+        return errorResponse("Outing not found", 404);
+      }
+
+      if (outing.is_closed === 1) {
+        return errorResponse(
+          "Outing is closed. No new requests allowed.",
+          400
+        );
+      }
 
         await env.DB.prepare(`
           INSERT INTO interest_requests (
@@ -206,7 +278,8 @@ export default {
               o.title,
               o.activity_type,
               o.date_time,
-              o.location
+              o.location,
+              o.is_closed
             FROM interest_requests ir
             JOIN outings o ON ir.outing_id = o.id
             WHERE ir.requester_user_id = ?

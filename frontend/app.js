@@ -2,6 +2,7 @@
  * Frontend entry point
  * Handles UI rendering, user switching, and backend interactions
  */
+
 console.log("Frontend MVP loaded");
 let isInitialLoad = true;
 
@@ -21,30 +22,26 @@ const userSelector = document.getElementById("user-selector");
 const currentUserLabel = document.getElementById("current-user-label");
 
 /* =========================================================
-   Global Map
+   GLOBAL STATE
    ========================================================= */
 
 let myInterestStatusByOuting = {};
 
 /* =========================================================
-   HELPER FUNCTIONS (AP-7)
+   HELPER FUNCTIONS
    ========================================================= */
 
-/** Show backend error message */
 function showError(message) {
-  if (isInitialLoad) return; // suppress errors on initial load
+  if (isInitialLoad) return;
   errorEl.textContent = message;
   errorEl.classList.remove("hidden");
 }
 
-
-/** Clear error message */
 function clearError() {
   errorEl.textContent = "";
   errorEl.classList.add("hidden");
 }
 
-/** Show success message */
 function showSuccess(message) {
   messageEl.textContent = message;
   messageEl.classList.remove("hidden");
@@ -53,8 +50,9 @@ function showSuccess(message) {
     messageEl.classList.add("hidden");
   }, 3000);
 }
+
 /* =========================================================
-   AP-15: Status → UI mapping
+   STATUS UI MAPPING
    ========================================================= */
 
 const STATUS_UI = {
@@ -76,7 +74,7 @@ const STATUS_UI = {
 };
 
 /* =========================================================
-   USER SWITCHING (AP-6)
+   USER SWITCHING
    ========================================================= */
 
 function updateUserUI() {
@@ -88,15 +86,14 @@ userSelector.addEventListener("change", async () => {
   updateUserUI();
   clearError();
 
-  await loadMyRequests(); // rebuild interest state
-  await loadOutings();    // render correctly
+  await loadMyRequests();
+  await loadOutings();
 
   requestsListEl.innerHTML = "<li>Select one of your outings</li>";
 });
 
-
 /* =========================================================
-   CREATE OUTING (AP-2 + AP-7)
+   CREATE OUTING
    ========================================================= */
 
 form.addEventListener("submit", async (e) => {
@@ -106,7 +103,9 @@ form.addEventListener("submit", async (e) => {
   const payload = {
     title: document.getElementById("title").value,
     activity_type: document.getElementById("type").value,
-    date_time: document.getElementById("date_time").value,
+    date_time: Math.floor(
+      new Date(document.getElementById("date_time").value).getTime() / 1000
+    ),
     location: document.getElementById("location").value
   };
 
@@ -121,7 +120,7 @@ form.addEventListener("submit", async (e) => {
 });
 
 /* =========================================================
-   LOAD OUTINGS (AP-3 → AP-7)
+   LOAD OUTINGS (FEED)
    ========================================================= */
 
 async function loadOutings() {
@@ -133,24 +132,59 @@ async function loadOutings() {
 
     outings.forEach((outing) => {
       const li = document.createElement("li");
-      li.textContent = `${outing.title} | ${outing.activity_type}`;
 
-      /* ---------- HOST VIEW ---------- */
+      /* ---------- TITLE ROW ---------- */
+      const titleRow = document.createElement("div");
+      titleRow.textContent = `${outing.title} | ${outing.activity_type}`;
+      li.appendChild(titleRow);
+
+      /* ---------- BUTTON ROW ---------- */
+      const buttonRow = document.createElement("div");
+      buttonRow.className = "button-row";
+
+      /* ==========================
+         HOST VIEW
+         ========================== */
       if (outing.host_user_id === window.currentUser) {
         const viewBtn = document.createElement("button");
         viewBtn.textContent = "View requests";
         viewBtn.onclick = () => loadRequests(outing.id);
-        li.appendChild(viewBtn);
+        buttonRow.appendChild(viewBtn);
+
+        if (outing.is_closed === 0) {
+          const closeBtn = document.createElement("button");
+          closeBtn.textContent = "Close outing";
+
+          closeBtn.onclick = async () => {
+            clearError();
+            try {
+              await closeOuting(outing.id);
+              showSuccess("Outing closed successfully!");
+              loadOutings();
+              loadMyRequests();
+            } catch (err) {
+              showError(err.message);
+            }
+          };
+
+          buttonRow.appendChild(closeBtn);
+        } else {
+          const closedTag = document.createElement("span");
+          closedTag.textContent = " 🚫 Closed";
+          closedTag.className = "closed-tag";
+          buttonRow.appendChild(closedTag);
+        }
       }
 
-      /* ---------- GUEST VIEW ---------- */
+      /* ==========================
+         GUEST VIEW
+         ========================== */
       if (outing.host_user_id !== window.currentUser) {
         const interestBtn = document.createElement("button");
 
         const status = myInterestStatusByOuting[outing.id];
 
         if (!status) {
-          // No request yet
           interestBtn.textContent = "I'm interested";
 
           interestBtn.onclick = async () => {
@@ -162,29 +196,26 @@ async function loadOutings() {
               interestBtn.disabled = true;
               interestBtn.classList.add("pending");
 
-              loadMyRequests(); // immediately reflect in AP-15 section
+              loadMyRequests();
             } catch (err) {
               showError(err.message);
             }
           };
+        } else {
+          if (outing.is_closed === 1) {
+            interestBtn.textContent = `${STATUS_UI[status].label} (Outing Closed)`;
+          } else {
+            interestBtn.textContent = STATUS_UI[status].label;
+          }
 
-        } else if (status === "pending") {
-          interestBtn.textContent = "Awaiting host response";
           interestBtn.disabled = true;
-          interestBtn.classList.add("pending");
-        } else if (status === "accepted") {
-          interestBtn.textContent = "Request accepted";
-          interestBtn.disabled = true;
-          interestBtn.classList.add("accepted");
-        } else if (status === "rejected") {
-          interestBtn.textContent = "Request rejected";
-          interestBtn.disabled = true;
-          interestBtn.classList.add("rejected");
+          interestBtn.classList.add(status);
         }
 
-        li.appendChild(interestBtn);
+        buttonRow.appendChild(interestBtn);
       }
 
+      li.appendChild(buttonRow);
       outingsListEl.appendChild(li);
     });
   } catch (err) {
@@ -193,7 +224,7 @@ async function loadOutings() {
 }
 
 /* =========================================================
-   LOAD INTEREST REQUESTS (AP-5 + AP-7)
+   LOAD HOST REQUESTS
    ========================================================= */
 
 async function loadRequests(outingId) {
@@ -221,23 +252,16 @@ async function loadRequests(outingId) {
 
         acceptBtn.onclick = async () => {
           clearError();
-          try {
-            await updateInterestStatus(req.id, "accepted");
-            loadRequests(outingId);
-            loadMyRequests(); // keep guest state in sync
-          } catch (err) {
-            showError(err.message);
-          }
+          await updateInterestStatus(req.id, "accepted");
+          loadRequests(outingId);
+          loadMyRequests();
         };
 
         rejectBtn.onclick = async () => {
           clearError();
-          try {
-            await updateInterestStatus(req.id, "rejected");
-            loadRequests(outingId);
-          } catch (err) {
-            showError(err.message);
-          }
+          await updateInterestStatus(req.id, "rejected");
+          loadRequests(outingId);
+          loadMyRequests();
         };
 
         li.appendChild(acceptBtn);
@@ -250,8 +274,9 @@ async function loadRequests(outingId) {
     showError(err.message);
   }
 }
+
 /* =========================================================
-   AP-15: Load my interest requests (Guest)
+   LOAD MY REQUESTS (GUEST STATUS PANEL)
    ========================================================= */
 
 async function loadMyRequests() {
@@ -260,12 +285,11 @@ async function loadMyRequests() {
 
   try {
     const requests = await getMyInterestRequests();
-    myInterestStatusByOuting = {};
-      requests.forEach(req => {
-        myInterestStatusByOuting[req.outing_id] = req.status;
-      });
 
-    requests.sort((a, b) => b.created_at - a.created_at);
+    myInterestStatusByOuting = {};
+    requests.forEach((req) => {
+      myInterestStatusByOuting[req.outing_id] = req.status;
+    });
 
     if (requests.length === 0) {
       myRequestsListEl.innerHTML = "<li>No requests yet</li>";
@@ -274,16 +298,35 @@ async function loadMyRequests() {
 
     requests.forEach((req) => {
       const li = document.createElement("li");
-
       const ui = STATUS_UI[req.status];
+
+      let closedNote = "";
+
+      if (req.is_closed === 1) {
+        if (req.status === "accepted") {
+          closedNote =
+            "✅ Host closed requests. You’re confirmed and ready to meet!";
+        } else if (req.status === "pending") {
+          closedNote =
+            "⏳ Host closed this outing before deciding. No further requests allowed.";
+        } else {
+          closedNote =
+            "🚫 Host finalized decisions and closed this outing.";
+        }
+      }
 
       li.innerHTML = `
         <strong>${req.title}</strong><br/>
-        ${req.activity_type} | ${req.date_time}<br/>
-        ${req.location || ""}<br/>
+        ${req.activity_type} | ${req.location || ""}<br/>
         <span class="${ui.className}">
           ${ui.label}: ${ui.message}
         </span>
+
+        ${
+          closedNote
+            ? `<div class="closed-note ${req.status}-note">${closedNote}</div>`
+            : ""
+        }
       `;
 
       myRequestsListEl.appendChild(li);
@@ -293,15 +336,14 @@ async function loadMyRequests() {
   }
 }
 
-
 /* =========================================================
    INITIAL LOAD
    ========================================================= */
 
 async function initApp() {
   updateUserUI();
-  await loadMyRequests(); // MUST come first
-  await loadOutings();    // uses interest state
+  await loadMyRequests();
+  await loadOutings();
   isInitialLoad = false;
 }
 
