@@ -51,6 +51,21 @@ function showSuccess(message) {
   }, 3000);
 }
 
+function createButton(label, onClick, className) {
+  const button = document.createElement("button");
+  button.textContent = label;
+
+  if (className) {
+    button.classList.add(className);
+  }
+
+  if (onClick) {
+    button.onclick = onClick;
+  }
+
+  return button;
+}
+
 /* =========================================================
    STATUS UI MAPPING
    ========================================================= */
@@ -146,16 +161,14 @@ async function loadOutings() {
          HOST VIEW
          ========================== */
       if (outing.host_user_id === window.currentUser) {
-        const viewBtn = document.createElement("button");
-        viewBtn.textContent = "View requests";
-        viewBtn.onclick = () => loadRequests(outing.id);
+        const viewBtn = createButton(
+          "View requests",
+          () => loadRequests(outing.id)
+        );
         buttonRow.appendChild(viewBtn);
 
         if (outing.is_closed === 0) {
-          const closeBtn = document.createElement("button");
-          closeBtn.textContent = "Close outing";
-
-          closeBtn.onclick = async () => {
+          const closeBtn = createButton("Close outing", async () => {
             clearError();
             try {
               await closeOuting(outing.id);
@@ -165,8 +178,7 @@ async function loadOutings() {
             } catch (err) {
               showError(err.message);
             }
-          };
-
+          });
           buttonRow.appendChild(closeBtn);
         } else {
           const closedTag = document.createElement("span");
@@ -180,7 +192,7 @@ async function loadOutings() {
          GUEST VIEW
          ========================== */
       if (outing.host_user_id !== window.currentUser) {
-        const interestBtn = document.createElement("button");
+        const interestBtn = createButton("", null);
 
         const status = myInterestStatusByOuting[outing.id];
 
@@ -244,25 +256,19 @@ async function loadRequests(outingId) {
       li.textContent = `User: ${req.requester_user_id} | Status: ${req.status}`;
 
       if (req.status === "pending") {
-        const acceptBtn = document.createElement("button");
-        acceptBtn.textContent = "Accept";
-
-        const rejectBtn = document.createElement("button");
-        rejectBtn.textContent = "Reject";
-
-        acceptBtn.onclick = async () => {
+        const acceptBtn = createButton("Accept", async () => {
           clearError();
           await updateInterestStatus(req.id, "accepted");
           loadRequests(outingId);
           loadMyRequests();
-        };
+        });
 
-        rejectBtn.onclick = async () => {
+        const rejectBtn = createButton("Reject", async () => {
           clearError();
           await updateInterestStatus(req.id, "rejected");
           loadRequests(outingId);
           loadMyRequests();
-        };
+        });
 
         li.appendChild(acceptBtn);
         li.appendChild(rejectBtn);
