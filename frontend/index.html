@@ -57,6 +57,37 @@
 
     <hr />
 
+    <h2>My profile</h2>
+    <form id="profile-form">
+      <div>
+        <label>Name</label><br />
+        <input type="text" id="profile-display-name" required />
+      </div>
+      <div>
+        <label>Email</label><br />
+        <input type="email" id="profile-email" disabled />
+      </div>
+      <div>
+        <label>Age</label><br />
+        <input type="number" id="profile-age" min="0" max="120" />
+      </div>
+      <div>
+        <label>Likes</label><br />
+        <input type="text" id="profile-likes" />
+      </div>
+      <div>
+        <label>Dislikes</label><br />
+        <input type="text" id="profile-dislikes" />
+      </div>
+      <div>
+        <label>Interests</label><br />
+        <input type="text" id="profile-interests" />
+      </div>
+      <button type="submit">Save profile</button>
+    </form>
+
+    <hr />
+
     <h2>Create an outing</h2>
     <form id="create-outing-form">
       <div>
@@ -86,6 +117,11 @@
 
     <h2>Available outings</h2>
     <ul id="outings-list"></ul>
+
+    <section id="host-profile-panel" class="hidden">
+      <h3>Host profile</h3>
+      <p id="host-profile-details"></p>
+    </section>
 
     <hr />
 

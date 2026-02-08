@@ -25,6 +25,38 @@ const isValidEmail = (email) =>
 const isValidPassword = (password) =>
   typeof password === "string" && password.length >= 8;
 
+const normalizeOptionalText = (value) => {
+  if (value === undefined || value === null) {
+    return null;
+  }
+
+  const normalized = String(value).trim();
+  return normalized ? normalized : null;
+};
+
+const normalizeAge = (value) => {
+  if (value === undefined || value === null || value === "") {
+    return null;
+  }
+
+  const parsed = Number(value);
+  if (!Number.isInteger(parsed) || parsed < 0 || parsed > 120) {
+    return null;
+  }
+
+  return parsed;
+};
+
+const userPayload = (user) => ({
+  id: user.id,
+  email: user.email,
+  display_name: user.display_name,
+  age: user.age ?? null,
+  likes: user.likes ?? null,
+  dislikes: user.dislikes ?? null,
+  interests: user.interests ?? null
+});
+
 const toHex = (bytes) =>
   Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
 
@@ -49,6 +81,10 @@ const ensureUsersSchema = async (db) => {
           email TEXT NOT NULL UNIQUE,
           password_hash TEXT NOT NULL,
           display_name TEXT NOT NULL,
+          age INTEGER,
+          likes TEXT,
+          dislikes TEXT,
+          interests TEXT,
           created_at INTEGER NOT NULL
         )
       `
@@ -73,6 +109,22 @@ const ensureUsersSchema = async (db) => {
 
   if (!columns.has("created_at")) {
     await db.prepare("ALTER TABLE users ADD COLUMN created_at INTEGER").run();
+  }
+
+  if (!columns.has("age")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN age INTEGER").run();
+  }
+
+  if (!columns.has("likes")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN likes TEXT").run();
+  }
+
+  if (!columns.has("dislikes")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN dislikes TEXT").run();
+  }
+
+  if (!columns.has("interests")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN interests TEXT").run();
   }
 
   await db.prepare(
@@ -152,6 +204,7 @@ const getSessionToken = (request) => {
 };
 
 const getAuthenticatedUser = async (request, db) => {
+  await ensureUsersSchema(db);
   const token = getSessionToken(request);
   if (!token) {
     throw new Response(JSON.stringify({ error: "Missing session token" }), {
@@ -165,7 +218,7 @@ const getAuthenticatedUser = async (request, db) => {
 
   const session = await db.prepare(
     `
-      SELECT s.user_id, s.expires_at, u.email, u.display_name
+      SELECT s.user_id, s.expires_at, u.email, u.display_name, u.age, u.likes, u.dislikes, u.interests
       FROM sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.token = ?
@@ -204,7 +257,11 @@ const getAuthenticatedUser = async (request, db) => {
     user: {
       id: session.user_id,
       email: session.email,
-      display_name: session.display_name
+      display_name: session.display_name,
+      age: session.age ?? null,
+      likes: session.likes ?? null,
+      dislikes: session.dislikes ?? null,
+      interests: session.interests ?? null
     },
     token,
     expires_at: refreshedExpiresAt
@@ -264,8 +321,8 @@ export default {
 
         await env.DB.prepare(
           `
-            INSERT INTO users (id, email, password_hash, display_name, created_at)
-            VALUES (?, ?, ?, ?, strftime('%s','now'))
+            INSERT INTO users (id, email, password_hash, display_name, age, likes, dislikes, interests, created_at)
+            VALUES (?, ?, ?, ?, NULL, NULL, NULL, NULL, strftime('%s','now'))
           `
         )
           .bind(userId, email, password_hash, safeDisplayName)
@@ -275,11 +332,11 @@ export default {
 
         return json(
           {
-            user: {
+            user: userPayload({
               id: userId,
               email,
               display_name: safeDisplayName
-            },
+            }),
             token: session.token,
             expires_at: session.expires_at
           },
@@ -301,7 +358,7 @@ export default {
 
         const user = await env.DB.prepare(
           `
-            SELECT id, email, password_hash, display_name
+            SELECT id, email, password_hash, display_name, age, likes, dislikes, interests
             FROM users
             WHERE email = ?
           `
@@ -321,11 +378,7 @@ export default {
         const session = await createSession(env.DB, user.id);
 
         return json({
-          user: {
-            id: user.id,
-            email: user.email,
-            display_name: user.display_name
-          },
+          user: userPayload(user),
           token: session.token,
           expires_at: session.expires_at
         });
@@ -358,6 +411,107 @@ export default {
         return json({ message: "Logged out" });
       }
 
+      if (request.method === "GET" && url.pathname === "/profile") {
+        await ensureUsersSchema(env.DB);
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+
+        return json({ user: auth.user }, 200, sessionHeaders(auth.expires_at));
+      }
+
+      if (request.method === "PATCH" && url.pathname === "/profile") {
+        await ensureUsersSchema(env.DB);
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const body = await request.json();
+
+        const nextDisplayName = normalizeOptionalText(body.display_name);
+        const nextAge = normalizeAge(body.age);
+        const nextLikes = normalizeOptionalText(body.likes);
+        const nextDislikes = normalizeOptionalText(body.dislikes);
+        const nextInterests = normalizeOptionalText(body.interests);
+
+        if (body.display_name !== undefined && !nextDisplayName) {
+          return errorResponse("display_name cannot be empty", 400);
+        }
+
+        if (body.age !== undefined && body.age !== null && body.age !== "" && nextAge === null) {
+          return errorResponse("age must be a whole number between 0 and 120", 400);
+        }
+
+        const shouldUpdateDisplayName = body.display_name !== undefined;
+        const shouldUpdateAge = body.age !== undefined;
+        const shouldUpdateLikes = body.likes !== undefined;
+        const shouldUpdateDislikes = body.dislikes !== undefined;
+        const shouldUpdateInterests = body.interests !== undefined;
+
+        await env.DB.prepare(
+          `
+            UPDATE users
+            SET
+              display_name = CASE WHEN ? THEN ? ELSE display_name END,
+              age = CASE WHEN ? THEN ? ELSE age END,
+              likes = CASE WHEN ? THEN ? ELSE likes END,
+              dislikes = CASE WHEN ? THEN ? ELSE dislikes END,
+              interests = CASE WHEN ? THEN ? ELSE interests END
+            WHERE id = ?
+          `
+        )
+          .bind(
+            shouldUpdateDisplayName ? 1 : 0,
+            nextDisplayName,
+            shouldUpdateAge ? 1 : 0,
+            nextAge,
+            shouldUpdateLikes ? 1 : 0,
+            nextLikes,
+            shouldUpdateDislikes ? 1 : 0,
+            nextDislikes,
+            shouldUpdateInterests ? 1 : 0,
+            nextInterests,
+            auth.user.id
+          )
+          .run();
+
+        const updatedUser = await env.DB.prepare(
+          `
+            SELECT id, email, display_name, age, likes, dislikes, interests
+            FROM users
+            WHERE id = ?
+          `
+        )
+          .bind(auth.user.id)
+          .first();
+
+        return json({ user: userPayload(updatedUser) }, 200, sessionHeaders(auth.expires_at));
+      }
+
+      if (
+        request.method === "GET" &&
+        url.pathname.startsWith("/users/") &&
+        url.pathname.endsWith("/profile")
+      ) {
+        await ensureUsersSchema(env.DB);
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const targetUserId = url.pathname.split("/")[2];
+
+        const user = await env.DB.prepare(
+          `
+            SELECT id, email, display_name, age, likes, dislikes, interests
+            FROM users
+            WHERE id = ?
+          `
+        )
+          .bind(targetUserId)
+          .first();
+
+        if (!user) {
+          return errorResponse("User not found", 404);
+        }
+
+        return json({ user: userPayload(user) }, 200, sessionHeaders(auth.expires_at));
+      }
+
       if (request.method === "GET" && url.pathname === "/outings") {
         await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
@@ -365,8 +519,9 @@ export default {
 
         const result = await env.DB.prepare(
           `
-            SELECT o.*
+            SELECT o.*, u.display_name AS host_display_name
             FROM outings o
+            JOIN users u ON u.id = o.host_user_id
             LEFT JOIN interest_requests ir
               ON o.id = ir.outing_id
               AND ir.requester_user_id = ?

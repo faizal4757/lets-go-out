@@ -19,6 +19,15 @@ const outingsListEl = document.getElementById("outings-list");
 const requestsListEl = document.getElementById("requests-list");
 const myRequestsListEl = document.getElementById("my-requests-list");
 const currentUserLabel = document.getElementById("current-user-label");
+const profileForm = document.getElementById("profile-form");
+const profileDisplayNameInput = document.getElementById("profile-display-name");
+const profileEmailInput = document.getElementById("profile-email");
+const profileAgeInput = document.getElementById("profile-age");
+const profileLikesInput = document.getElementById("profile-likes");
+const profileDislikesInput = document.getElementById("profile-dislikes");
+const profileInterestsInput = document.getElementById("profile-interests");
+const hostProfilePanel = document.getElementById("host-profile-panel");
+const hostProfileDetails = document.getElementById("host-profile-details");
 
 let myInterestStatusByOuting = {};
 
@@ -93,6 +102,61 @@ function updateUserUI() {
   currentUserLabel.textContent = `${name} (${window.currentUserProfile.email})`;
 }
 
+function hideHostProfilePanel() {
+  hostProfilePanel.classList.add("hidden");
+  hostProfileDetails.textContent = "";
+}
+
+function renderProfileForm(user) {
+  profileDisplayNameInput.value = user.display_name || "";
+  profileEmailInput.value = user.email || "";
+  profileAgeInput.value = user.age ?? "";
+  profileLikesInput.value = user.likes || "";
+  profileDislikesInput.value = user.dislikes || "";
+  profileInterestsInput.value = user.interests || "";
+}
+
+function syncSessionUser(user) {
+  if (!window.currentSessionToken || !window.currentSessionExpiry) {
+    return;
+  }
+
+  setCurrentUser({
+    user,
+    token: window.currentSessionToken,
+    expires_at: window.currentSessionExpiry
+  });
+}
+
+async function loadMyProfile() {
+  const profile = await getMyProfile();
+  syncSessionUser(profile.user);
+  renderProfileForm(profile.user);
+  updateUserUI();
+}
+
+async function showHostProfile(userId) {
+  clearError();
+
+  try {
+    const profile = await getUserProfile(userId);
+    const user = profile.user;
+    const lines = [
+      `Name: ${user.display_name || "N/A"}`,
+      `Email: ${user.email || "N/A"}`,
+      `Age: ${user.age ?? "N/A"}`,
+      `Likes: ${user.likes || "N/A"}`,
+      `Dislikes: ${user.dislikes || "N/A"}`,
+      `Interests: ${user.interests || "N/A"}`
+    ];
+
+    hostProfileDetails.textContent = lines.join("\n");
+    hostProfilePanel.classList.remove("hidden");
+  } catch (err) {
+    showError(err.message);
+  }
+}
+
 async function renderAuthState() {
   clearError();
 
@@ -110,6 +174,7 @@ async function renderAuthState() {
     setCurrentUser(null);
     appSection.classList.add("hidden");
     authSection.classList.remove("hidden");
+    hideHostProfilePanel();
     showAuthMode("login");
     return;
   }
@@ -117,6 +182,8 @@ async function renderAuthState() {
   authSection.classList.add("hidden");
   appSection.classList.remove("hidden");
   updateUserUI();
+  hideHostProfilePanel();
+  await loadMyProfile();
 
   requestsListEl.innerHTML = "<li>Select one of your outings</li>";
   await loadMyRequests();
@@ -201,6 +268,34 @@ logoutBtn.addEventListener("click", async () => {
   await renderAuthState();
 });
 
+profileForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  clearError();
+
+  const payload = {
+    display_name: profileDisplayNameInput.value.trim(),
+    age: profileAgeInput.value === "" ? "" : Number(profileAgeInput.value),
+    likes: profileLikesInput.value.trim(),
+    dislikes: profileDislikesInput.value.trim(),
+    interests: profileInterestsInput.value.trim()
+  };
+
+  if (!payload.display_name) {
+    showError("Name is required.");
+    return;
+  }
+
+  try {
+    const result = await updateMyProfile(payload);
+    syncSessionUser(result.user);
+    renderProfileForm(result.user);
+    updateUserUI();
+    showSuccess("Profile updated.");
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   clearError();
@@ -241,11 +336,13 @@ async function loadOutings() {
       const li = document.createElement("li");
 
       const titleRow = document.createElement("div");
-      titleRow.textContent = `${outing.title} | ${outing.activity_type}`;
+      titleRow.textContent = `${outing.title} | ${outing.activity_type} | Host: ${outing.host_display_name || outing.host_user_id}`;
       li.appendChild(titleRow);
 
       const buttonRow = document.createElement("div");
       buttonRow.className = "button-row";
+      const hostProfileBtn = createButton("View host profile", () => showHostProfile(outing.host_user_id));
+      buttonRow.appendChild(hostProfileBtn);
 
       if (outing.host_user_id === window.currentUser) {
         const viewBtn = createButton("View requests", () => loadRequests(outing.id));

@@ -77,6 +77,16 @@ window.logoutSession = () =>
     method: "POST"
   });
 
+window.getMyProfile = () => apiRequest("/profile");
+
+window.updateMyProfile = (payload) =>
+  apiRequest("/profile", {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+
+window.getUserProfile = (userId) => apiRequest(`/users/${userId}/profile`);
+
 window.createOuting = (payload) =>
   apiRequest("/outings", {
     method: "POST",

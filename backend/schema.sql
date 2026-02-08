@@ -6,6 +6,10 @@ CREATE TABLE IF NOT EXISTS users (
   email TEXT NOT NULL UNIQUE,
   password_hash TEXT NOT NULL,
   display_name TEXT NOT NULL,
+  age INTEGER,
+  likes TEXT,
+  dislikes TEXT,
+  interests TEXT,
   created_at INTEGER NOT NULL
 );
 
