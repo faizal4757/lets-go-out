@@ -2,7 +2,29 @@ name = "lets-go-out"
 main = "backend/index.js"
 compatibility_date = "2024-12-01"
 
-[[d1_databases]]
+# GitHub OAuth Configuration
+# Development: wrangler secret put GITHUB_CLIENT_ID --env dev
+# Production: wrangler secret put GITHUB_CLIENT_ID --env production
+
+# Development environment
+[env.dev]
+[[env.dev.d1_databases]]
 binding = "DB"
 database_name = "lets_go_out_main"
 database_id = "068e4c99-59db-4d77-802c-2f066ec60ee8"
+
+[env.dev.vars]
+FRONTEND_URL = "http://localhost:8080"
+GITHUB_REDIRECT_URI = "http://localhost:8787/auth/github/callback"
+
+# Production environment
+[env.production]
+name = "lets-go-out"
+[[env.production.d1_databases]]
+binding = "DB"
+database_name = "lets_go_out_main"
+database_id = "068e4c99-59db-4d77-802c-2f066ec60ee8"
+
+[env.production.vars]
+FRONTEND_URL = "https://lets-go-out.pages.dev"
+GITHUB_REDIRECT_URI = "https://lets-go-out.lets-go-out-api.workers.dev/auth/github/callback"

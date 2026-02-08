@@ -5,7 +5,7 @@ const corsHeaders = {
   "Access-Control-Expose-Headers": "X-Session-Expires-At"
 };
 
-const SESSION_TTL_SECONDS = 5 * 60;
+const SESSION_TTL_SECONDS = 24 * 60 * 60; // 24 hours
 
 const json = (data, status = 200, extraHeaders = {}) =>
   new Response(JSON.stringify(data), {
@@ -171,6 +171,82 @@ const ensureSessionsSchema = async (db) => {
   ).run();
 };
 
+const ensureOutingsSchema = async (db) => {
+  const outingsTable = await db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'outings'"
+  ).first();
+
+  if (!outingsTable) {
+    await db.prepare(
+      `
+        CREATE TABLE outings (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT,
+          outing_mode TEXT NOT NULL,
+          activity_type TEXT NOT NULL,
+          location TEXT,
+          virtual_link TEXT,
+          date_time INTEGER NOT NULL,
+          host_user_id TEXT NOT NULL,
+          status TEXT NOT NULL,
+          is_closed INTEGER DEFAULT 0,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (host_user_id) REFERENCES users(id)
+        )
+      `
+    ).run();
+  } else {
+    const tableInfo = await db.prepare("PRAGMA table_info(outings)").all();
+    const columns = new Set(tableInfo.results.map((col) => col.name));
+
+    if (!columns.has("is_closed")) {
+      await db.prepare("ALTER TABLE outings ADD COLUMN is_closed INTEGER DEFAULT 0").run();
+    }
+  }
+
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_outings_host_user_id ON outings(host_user_id)"
+  ).run();
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_outings_created_at ON outings(created_at)"
+  ).run();
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_outings_is_closed ON outings(is_closed)"
+  ).run();
+};
+
+const ensureInterestRequestsSchema = async (db) => {
+  try {
+    await db.prepare(
+      "CREATE INDEX IF NOT EXISTS idx_interest_requests_outing_id ON interest_requests(outing_id)"
+    ).run();
+    await db.prepare(
+      "CREATE INDEX IF NOT EXISTS idx_interest_requests_requester ON interest_requests(requester_user_id)"
+    ).run();
+    await db.prepare(
+      "CREATE INDEX IF NOT EXISTS idx_interest_requests_status ON interest_requests(status)"
+    ).run();
+  } catch (_err) {
+    // Indexes may already exist, that's okay
+  }
+};
+
+let schemaInitialized = false;
+const ensureSchema = async (db) => {
+  if (schemaInitialized) return;
+  await ensureUsersSchema(db);
+  await ensureSessionsSchema(db);
+  await ensureOutingsSchema(db);
+  await ensureInterestRequestsSchema(db);
+  schemaInitialized = true;
+};
+
+const cleanupExpiredSessions = async (db) => {
+  const now = nowUnix();
+  await db.prepare("DELETE FROM sessions WHERE expires_at < ?").bind(now - 3600).run();
+};
+
 const nowUnix = () => Math.floor(Date.now() / 1000);
 
 const sessionHeaders = (expiresAt) =>
@@ -204,7 +280,6 @@ const getSessionToken = (request) => {
 };
 
 const getAuthenticatedUser = async (request, db) => {
-  await ensureUsersSchema(db);
   const token = getSessionToken(request);
   if (!token) {
     throw new Response(JSON.stringify({ error: "Missing session token" }), {
@@ -284,9 +359,10 @@ export default {
         return json({ status: "ok" });
       }
 
+      // Initialize schema once per worker instance
+      await ensureSchema(env.DB);
+
       if (request.method === "POST" && url.pathname === "/auth/signup") {
-        await ensureUsersSchema(env.DB);
-        await ensureSessionsSchema(env.DB);
 
         const body = await request.json();
         const email = String(body.email || "").trim().toLowerCase();
@@ -345,9 +421,6 @@ export default {
       }
 
       if (request.method === "POST" && url.pathname === "/auth/login") {
-        await ensureUsersSchema(env.DB);
-        await ensureSessionsSchema(env.DB);
-
         const body = await request.json();
         const email = String(body.email || "").trim().toLowerCase();
         const password = String(body.password || "");
@@ -385,8 +458,6 @@ export default {
       }
 
       if (request.method === "GET" && url.pathname === "/auth/session") {
-        await ensureUsersSchema(env.DB);
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
 
         return json(
@@ -401,7 +472,6 @@ export default {
       }
 
       if (request.method === "POST" && url.pathname === "/auth/logout") {
-        await ensureSessionsSchema(env.DB);
         const token = getSessionToken(request);
 
         if (token) {
@@ -412,16 +482,12 @@ export default {
       }
 
       if (request.method === "GET" && url.pathname === "/profile") {
-        await ensureUsersSchema(env.DB);
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
 
         return json({ user: auth.user }, 200, sessionHeaders(auth.expires_at));
       }
 
       if (request.method === "PATCH" && url.pathname === "/profile") {
-        await ensureUsersSchema(env.DB);
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const body = await request.json();
 
@@ -490,8 +556,6 @@ export default {
         url.pathname.startsWith("/users/") &&
         url.pathname.endsWith("/profile")
       ) {
-        await ensureUsersSchema(env.DB);
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const targetUserId = url.pathname.split("/")[2];
 
@@ -513,33 +577,36 @@ export default {
       }
 
       if (request.method === "GET" && url.pathname === "/outings") {
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const currentUser = auth.user.id;
 
-        const result = await env.DB.prepare(
-          `
-            SELECT o.*, u.display_name AS host_display_name
-            FROM outings o
-            JOIN users u ON u.id = o.host_user_id
-            LEFT JOIN interest_requests ir
-              ON o.id = ir.outing_id
-              AND ir.requester_user_id = ?
-            WHERE
-              COALESCE(o.is_closed, 0) = 0
-              OR ir.requester_user_id IS NOT NULL
-              OR o.host_user_id = ?
-            ORDER BY o.created_at DESC
-          `
-        )
-          .bind(currentUser, currentUser)
-          .all();
+        try {
+          const result = await env.DB.prepare(
+            `
+              SELECT o.*, u.display_name AS host_display_name
+              FROM outings o
+              JOIN users u ON u.id = o.host_user_id
+              LEFT JOIN interest_requests ir
+                ON o.id = ir.outing_id
+                AND ir.requester_user_id = ?
+              WHERE
+                COALESCE(o.is_closed, 0) = 0
+                OR ir.requester_user_id IS NOT NULL
+                OR o.host_user_id = ?
+              ORDER BY o.created_at DESC
+            `
+          )
+            .bind(currentUser, currentUser)
+            .all();
 
-        return json(result.results, 200, sessionHeaders(auth.expires_at));
+          return json(result.results || [], 200, sessionHeaders(auth.expires_at));
+        } catch (err) {
+          console.error("Error fetching outings:", err);
+          return errorResponse("Failed to fetch outings: " + (err.message || "unknown error"), 500);
+        }
       }
 
       if (request.method === "POST" && url.pathname === "/outings") {
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const host_user_id = auth.user.id;
         const body = await request.json();
@@ -584,7 +651,6 @@ export default {
         url.pathname.startsWith("/outings/") &&
         url.pathname.split("/").filter(Boolean).length === 2
       ) {
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const host_user_id = auth.user.id;
         const outing_id = url.pathname.split("/")[2];
@@ -706,7 +772,6 @@ export default {
         url.pathname.startsWith("/outings/") &&
         url.pathname.endsWith("/close")
       ) {
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const host_user_id = auth.user.id;
         const outing_id = url.pathname.split("/")[2];
@@ -739,7 +804,6 @@ export default {
         url.pathname.startsWith("/outings/") &&
         url.pathname.endsWith("/interest_requests")
       ) {
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const currentUser = auth.user.id;
         const outing_id = url.pathname.split("/")[2];
@@ -773,7 +837,6 @@ export default {
       }
 
       if (request.method === "POST" && url.pathname === "/interest_requests") {
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const requester_user_id = auth.user.id;
         const body = await request.json();
@@ -823,39 +886,45 @@ export default {
       }
 
       if (request.method === "GET" && url.pathname === "/interest_requests") {
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const requester_user_id = auth.user.id;
 
-        const result = await env.DB.prepare(
-          `
-            SELECT
-              ir.id,
-              ir.outing_id,
-              ir.status,
-              ir.created_at,
-              o.title,
-              o.activity_type,
-              o.date_time,
-              o.location,
-              o.is_closed
-            FROM interest_requests ir
-            JOIN outings o ON ir.outing_id = o.id
-            WHERE ir.requester_user_id = ?
-            ORDER BY ir.created_at DESC
-          `
-        )
-          .bind(requester_user_id)
-          .all();
+        try {
+          const result = await env.DB.prepare(
+            `
+              SELECT
+                ir.id,
+                ir.outing_id,
+                ir.status,
+                ir.created_at,
+                o.title,
+                o.activity_type,
+                o.date_time,
+                o.location,
+                o.is_closed
+              FROM interest_requests ir
+              JOIN outings o ON ir.outing_id = o.id
+              WHERE ir.requester_user_id = ?
+              ORDER BY ir.created_at DESC
+            `
+          )
+            .bind(requester_user_id)
+            .all();
 
-        return json(result.results, 200, sessionHeaders(auth.expires_at));
+          return json(result.results || [], 200, sessionHeaders(auth.expires_at));
+        } catch (err) {
+          console.error("Error fetching interest requests:", err);
+          return errorResponse(
+            "Failed to fetch interest requests: " + (err?.message || "unknown error"),
+            500
+          );
+        }
       }
 
       if (
         request.method === "PATCH" &&
         url.pathname.startsWith("/interest_requests/")
       ) {
-        await ensureSessionsSchema(env.DB);
         const auth = await getAuthenticatedUser(request, env.DB);
         const currentUser = auth.user.id;
         const interest_request_id = url.pathname.split("/")[2];
@@ -894,7 +963,11 @@ export default {
       if (err instanceof Response) {
         return err;
       }
-      return errorResponse("Internal Server Error", 500);
+      console.error("Unhandled error:", err);
+      return errorResponse(
+        "Internal Server Error: " + (err?.message || "unknown error"),
+        500
+      );
     }
   }
 };

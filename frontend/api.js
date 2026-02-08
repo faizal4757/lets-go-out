@@ -1,7 +1,30 @@
-const API_BASE_URL =
+const FALLBACK_API_BASE_URL =
   location.hostname === "localhost" || location.hostname === "127.0.0.1"
     ? "http://127.0.0.1:8787"
     : "https://lets-go-out.lets-go-out-api.workers.dev";
+let resolvedApiBaseUrl = null;
+
+async function loadApiBaseUrl() {
+  if (resolvedApiBaseUrl) {
+    return resolvedApiBaseUrl;
+  }
+
+  try {
+    const response = await fetch("/config", { cache: "no-store" });
+    if (response.ok) {
+      const data = await response.json();
+      if (data && typeof data.apiBaseUrl === "string" && data.apiBaseUrl.trim()) {
+        resolvedApiBaseUrl = data.apiBaseUrl.trim();
+        return resolvedApiBaseUrl;
+      }
+    }
+  } catch (_err) {
+    // Fallback is applied below if config fetch fails.
+  }
+
+  resolvedApiBaseUrl = FALLBACK_API_BASE_URL;
+  return resolvedApiBaseUrl;
+}
 const SESSION_EXPIRED_MESSAGE = "Session expired. Please log in again.";
 
 function expireSession() {
@@ -29,7 +52,8 @@ async function apiRequest(path, options = {}) {
     headers.Authorization = `Bearer ${window.currentSessionToken}`;
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  const apiBaseUrl = await loadApiBaseUrl();
+  const response = await fetch(`${apiBaseUrl}${path}`, {
     ...options,
     headers
   });
