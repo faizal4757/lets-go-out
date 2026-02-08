@@ -1,14 +1,15 @@
-/**
- * Frontend entry point
- * Handles UI rendering, user switching, and backend interactions
- */
+console.log("Frontend loaded");
 
-console.log("Frontend MVP loaded");
-let isInitialLoad = true;
+const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/* =========================================================
-   DOM REFERENCES
-   ========================================================= */
+const authSection = document.getElementById("auth-section");
+const appSection = document.getElementById("app-section");
+
+const signupForm = document.getElementById("signup-form");
+const loginForm = document.getElementById("login-form");
+const showSignupBtn = document.getElementById("show-signup-btn");
+const showLoginBtn = document.getElementById("show-login-btn");
+const logoutBtn = document.getElementById("logout-btn");
 
 const form = document.getElementById("create-outing-form");
 const messageEl = document.getElementById("message");
@@ -17,22 +18,29 @@ const errorEl = document.getElementById("global-error");
 const outingsListEl = document.getElementById("outings-list");
 const requestsListEl = document.getElementById("requests-list");
 const myRequestsListEl = document.getElementById("my-requests-list");
-
-const userSelector = document.getElementById("user-selector");
 const currentUserLabel = document.getElementById("current-user-label");
-
-/* =========================================================
-   GLOBAL STATE
-   ========================================================= */
 
 let myInterestStatusByOuting = {};
 
-/* =========================================================
-   HELPER FUNCTIONS
-   ========================================================= */
+const STATUS_UI = {
+  pending: {
+    label: "Pending",
+    message: "Waiting for host decision",
+    className: "pending"
+  },
+  accepted: {
+    label: "Accepted",
+    message: "You are in. See you there.",
+    className: "accepted"
+  },
+  rejected: {
+    label: "Rejected",
+    message: "This outing did not work out.",
+    className: "rejected"
+  }
+};
 
 function showError(message) {
-  if (isInitialLoad) return;
   errorEl.textContent = message;
   errorEl.classList.remove("hidden");
 }
@@ -45,7 +53,6 @@ function clearError() {
 function showSuccess(message) {
   messageEl.textContent = message;
   messageEl.classList.remove("hidden");
-
   setTimeout(() => {
     messageEl.classList.add("hidden");
   }, 3000);
@@ -66,77 +73,162 @@ function createButton(label, onClick, className) {
   return button;
 }
 
-/* =========================================================
-   STATUS UI MAPPING
-   ========================================================= */
-
-const STATUS_UI = {
-  pending: {
-    label: "Pending",
-    message: "Waiting for host decision",
-    className: "pending"
-  },
-  accepted: {
-    label: "Accepted",
-    message: "You’re in. See you there.",
-    className: "accepted"
-  },
-  rejected: {
-    label: "Rejected",
-    message: "This outing didn’t work out.",
-    className: "rejected"
+function showAuthMode(mode) {
+  if (mode === "signup") {
+    signupForm.classList.remove("hidden");
+    loginForm.classList.add("hidden");
+  } else {
+    signupForm.classList.add("hidden");
+    loginForm.classList.remove("hidden");
   }
-};
-
-/* =========================================================
-   USER SWITCHING
-   ========================================================= */
-
-function updateUserUI() {
-  currentUserLabel.textContent = window.currentUser;
 }
 
-userSelector.addEventListener("change", async () => {
-  setCurrentUser(userSelector.value);
-  updateUserUI();
+function updateUserUI() {
+  if (!window.currentUserProfile) {
+    currentUserLabel.textContent = "";
+    return;
+  }
+
+  const name = window.currentUserProfile.display_name || window.currentUserProfile.email;
+  currentUserLabel.textContent = `${name} (${window.currentUserProfile.email})`;
+}
+
+async function renderAuthState() {
   clearError();
 
-  await loadMyRequests();
-  await loadOutings();
+  if (!isAuthenticated()) {
+    appSection.classList.add("hidden");
+    authSection.classList.remove("hidden");
+    showAuthMode("signup");
+    return;
+  }
+
+  try {
+    const refreshedSession = await restoreSession();
+    setCurrentUser(refreshedSession);
+  } catch (_err) {
+    setCurrentUser(null);
+    appSection.classList.add("hidden");
+    authSection.classList.remove("hidden");
+    showAuthMode("login");
+    return;
+  }
+
+  authSection.classList.add("hidden");
+  appSection.classList.remove("hidden");
+  updateUserUI();
 
   requestsListEl.innerHTML = "<li>Select one of your outings</li>";
+  await loadMyRequests();
+  await loadOutings();
+}
+
+showSignupBtn.addEventListener("click", () => {
+  clearError();
+  showAuthMode("signup");
 });
 
-/* =========================================================
-   CREATE OUTING
-   ========================================================= */
+showLoginBtn.addEventListener("click", () => {
+  clearError();
+  showAuthMode("login");
+});
 
-form.addEventListener("submit", async (e) => {
+signupForm.addEventListener("submit", async (e) => {
   e.preventDefault();
   clearError();
 
-  const payload = {
-    title: document.getElementById("title").value,
-    activity_type: document.getElementById("type").value,
-    date_time: Math.floor(
-      new Date(document.getElementById("date_time").value).getTime() / 1000
-    ),
-    location: document.getElementById("location").value
-  };
+  const email = document.getElementById("signup-email").value.trim();
+  const password = document.getElementById("signup-password").value;
+  const display_name = document.getElementById("signup-display-name").value.trim();
+
+  if (!email || !password) {
+    showError("Email and password are required.");
+    return;
+  }
+
+  if (!emailPattern.test(email)) {
+    showError("Please enter a valid email address.");
+    return;
+  }
+
+  if (password.length < 8) {
+    showError("Password must be at least 8 characters.");
+    return;
+  }
 
   try {
-    await createOuting(payload);
-    showSuccess("Outing created successfully");
-    form.reset();
-    loadOutings();
+    const result = await signup({ email, password, display_name });
+    setCurrentUser(result);
+    signupForm.reset();
+    showSuccess("Account created. You are now logged in.");
+    await renderAuthState();
   } catch (err) {
     showError(err.message);
   }
 });
 
-/* =========================================================
-   LOAD OUTINGS (FEED)
-   ========================================================= */
+loginForm.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  clearError();
+
+  const email = document.getElementById("login-email").value.trim();
+  const password = document.getElementById("login-password").value;
+
+  if (!email || !password) {
+    showError("Email and password are required.");
+    return;
+  }
+
+  try {
+    const result = await login({ email, password });
+    setCurrentUser(result);
+    loginForm.reset();
+    showSuccess("Logged in successfully.");
+    await renderAuthState();
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
+logoutBtn.addEventListener("click", async () => {
+  try {
+    await logoutSession();
+  } catch (_err) {
+    // Local logout still applies even if server logout request fails.
+  }
+  setCurrentUser(null);
+  showSuccess("Logged out.");
+  await renderAuthState();
+});
+
+form.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  clearError();
+
+  const rawDate = document.getElementById("date_time").value;
+  const unixDate = Math.floor(new Date(rawDate).getTime() / 1000);
+
+  if (!Number.isFinite(unixDate)) {
+    showError("Please provide a valid date and time.");
+    return;
+  }
+
+  const payload = {
+    title: document.getElementById("title").value,
+    activity_type: document.getElementById("type").value,
+    date_time: unixDate,
+    location: document.getElementById("location").value
+  };
+
+  try {
+    await createOuting(payload);
+    showSuccess("Outing created successfully.");
+    form.reset();
+    await loadOutings();
+  } catch (err) {
+    showError(err.message);
+  }
+});
 
 async function loadOutings() {
   outingsListEl.innerHTML = "";
@@ -148,23 +240,15 @@ async function loadOutings() {
     outings.forEach((outing) => {
       const li = document.createElement("li");
 
-      /* ---------- TITLE ROW ---------- */
       const titleRow = document.createElement("div");
       titleRow.textContent = `${outing.title} | ${outing.activity_type}`;
       li.appendChild(titleRow);
 
-      /* ---------- BUTTON ROW ---------- */
       const buttonRow = document.createElement("div");
       buttonRow.className = "button-row";
 
-      /* ==========================
-         HOST VIEW
-         ========================== */
       if (outing.host_user_id === window.currentUser) {
-        const viewBtn = createButton(
-          "View requests",
-          () => loadRequests(outing.id)
-        );
+        const viewBtn = createButton("View requests", () => loadRequests(outing.id));
         buttonRow.appendChild(viewBtn);
 
         if (outing.is_closed === 0) {
@@ -172,9 +256,9 @@ async function loadOutings() {
             clearError();
             try {
               await closeOuting(outing.id);
-              showSuccess("Outing closed successfully!");
-              loadOutings();
-              loadMyRequests();
+              showSuccess("Outing closed successfully.");
+              await loadOutings();
+              await loadMyRequests();
             } catch (err) {
               showError(err.message);
             }
@@ -182,44 +266,34 @@ async function loadOutings() {
           buttonRow.appendChild(closeBtn);
         } else {
           const closedTag = document.createElement("span");
-          closedTag.textContent = " 🚫 Closed";
+          closedTag.textContent = "Closed";
           closedTag.className = "closed-tag";
           buttonRow.appendChild(closedTag);
         }
-      }
-
-      /* ==========================
-         GUEST VIEW
-         ========================== */
-      if (outing.host_user_id !== window.currentUser) {
+      } else {
         const interestBtn = createButton("", null);
-
         const status = myInterestStatusByOuting[outing.id];
 
         if (!status) {
-          interestBtn.textContent = "I'm interested";
-
+          interestBtn.textContent = "I am interested";
           interestBtn.onclick = async () => {
             clearError();
             try {
               await expressInterest(outing.id);
-
               interestBtn.textContent = "Awaiting host response";
               interestBtn.disabled = true;
               interestBtn.classList.add("pending");
-
-              loadMyRequests();
+              await loadMyRequests();
             } catch (err) {
               showError(err.message);
             }
           };
         } else {
           if (outing.is_closed === 1) {
-            interestBtn.textContent = `${STATUS_UI[status].label} (Outing Closed)`;
+            interestBtn.textContent = `${STATUS_UI[status].label} (Outing closed)`;
           } else {
             interestBtn.textContent = STATUS_UI[status].label;
           }
-
           interestBtn.disabled = true;
           interestBtn.classList.add(status);
         }
@@ -234,10 +308,6 @@ async function loadOutings() {
     showError(err.message);
   }
 }
-
-/* =========================================================
-   LOAD HOST REQUESTS
-   ========================================================= */
 
 async function loadRequests(outingId) {
   requestsListEl.innerHTML = "";
@@ -258,16 +328,24 @@ async function loadRequests(outingId) {
       if (req.status === "pending") {
         const acceptBtn = createButton("Accept", async () => {
           clearError();
-          await updateInterestStatus(req.id, "accepted");
-          loadRequests(outingId);
-          loadMyRequests();
+          try {
+            await updateInterestStatus(req.id, "accepted");
+            await loadRequests(outingId);
+            await loadMyRequests();
+          } catch (err) {
+            showError(err.message);
+          }
         });
 
         const rejectBtn = createButton("Reject", async () => {
           clearError();
-          await updateInterestStatus(req.id, "rejected");
-          loadRequests(outingId);
-          loadMyRequests();
+          try {
+            await updateInterestStatus(req.id, "rejected");
+            await loadRequests(outingId);
+            await loadMyRequests();
+          } catch (err) {
+            showError(err.message);
+          }
         });
 
         li.appendChild(acceptBtn);
@@ -281,17 +359,12 @@ async function loadRequests(outingId) {
   }
 }
 
-/* =========================================================
-   LOAD MY REQUESTS (GUEST STATUS PANEL)
-   ========================================================= */
-
 async function loadMyRequests() {
   myRequestsListEl.innerHTML = "";
   clearError();
 
   try {
     const requests = await getMyInterestRequests();
-
     myInterestStatusByOuting = {};
     requests.forEach((req) => {
       myInterestStatusByOuting[req.outing_id] = req.status;
@@ -307,32 +380,21 @@ async function loadMyRequests() {
       const ui = STATUS_UI[req.status];
 
       let closedNote = "";
-
       if (req.is_closed === 1) {
         if (req.status === "accepted") {
-          closedNote =
-            "✅ Host closed requests. You’re confirmed and ready to meet!";
+          closedNote = "Host closed requests. You are confirmed.";
         } else if (req.status === "pending") {
-          closedNote =
-            "⏳ Host closed this outing before deciding. No further requests allowed.";
+          closedNote = "Host closed this outing before deciding.";
         } else {
-          closedNote =
-            "🚫 Host finalized decisions and closed this outing.";
+          closedNote = "Host finalized decisions and closed this outing.";
         }
       }
 
       li.innerHTML = `
         <strong>${req.title}</strong><br/>
         ${req.activity_type} | ${req.location || ""}<br/>
-        <span class="${ui.className}">
-          ${ui.label}: ${ui.message}
-        </span>
-
-        ${
-          closedNote
-            ? `<div class="closed-note ${req.status}-note">${closedNote}</div>`
-            : ""
-        }
+        <span class="${ui.className}">${ui.label}: ${ui.message}</span>
+        ${closedNote ? `<div class="closed-note ${req.status}-note">${closedNote}</div>` : ""}
       `;
 
       myRequestsListEl.appendChild(li);
@@ -342,15 +404,10 @@ async function loadMyRequests() {
   }
 }
 
-/* =========================================================
-   INITIAL LOAD
-   ========================================================= */
+renderAuthState();
 
-async function initApp() {
-  updateUserUI();
-  await loadMyRequests();
-  await loadOutings();
-  isInitialLoad = false;
-}
-
-initApp();
+window.addEventListener("session-expired", async (event) => {
+  const message = event?.detail?.message || "Session expired. Please log in again.";
+  await renderAuthState();
+  showError(message);
+});

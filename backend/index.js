@@ -1,39 +1,220 @@
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, X-User-Id"
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Expose-Headers": "X-Session-Expires-At"
 };
 
-const json = (data, status = 200) =>
+const SESSION_TTL_SECONDS = 5 * 60;
+
+const json = (data, status = 200, extraHeaders = {}) =>
   new Response(JSON.stringify(data), {
     status,
     headers: {
       "Content-Type": "application/json",
-      ...corsHeaders
+      ...corsHeaders,
+      ...extraHeaders
     }
   });
 
-const errorResponse = (message, status = 500) =>
-  json({ error: message }, status);
+const errorResponse = (message, status = 500) => json({ error: message }, status);
 
-const getUserId = (request) => {
-  const userId = request.headers.get("X-User-Id");
-  if (!userId) {
-    throw new Response(
-      JSON.stringify({ error: "Missing X-User-Id header" }),
-      { status: 401, headers: corsHeaders }
-    );
+const isValidEmail = (email) =>
+  /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+
+const isValidPassword = (password) =>
+  typeof password === "string" && password.length >= 8;
+
+const toHex = (bytes) =>
+  Array.from(bytes).map((byte) => byte.toString(16).padStart(2, "0")).join("");
+
+const hashPassword = async (password) => {
+  const buffer = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(password)
+  );
+  return toHex(new Uint8Array(buffer));
+};
+
+const ensureUsersSchema = async (db) => {
+  const usersTable = await db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'users'"
+  ).first();
+
+  if (!usersTable) {
+    await db.prepare(
+      `
+        CREATE TABLE users (
+          id TEXT PRIMARY KEY,
+          email TEXT NOT NULL UNIQUE,
+          password_hash TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          created_at INTEGER NOT NULL
+        )
+      `
+    ).run();
+    return;
   }
-  return userId;
+
+  const tableInfo = await db.prepare("PRAGMA table_info(users)").all();
+  const columns = new Set(tableInfo.results.map((col) => col.name));
+
+  if (!columns.has("email")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN email TEXT").run();
+  }
+
+  if (!columns.has("password_hash")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN password_hash TEXT").run();
+  }
+
+  if (!columns.has("display_name")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN display_name TEXT").run();
+  }
+
+  if (!columns.has("created_at")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN created_at INTEGER").run();
+  }
+
+  await db.prepare(
+    "UPDATE users SET email = lower(id) || '@legacy.local' WHERE email IS NULL OR trim(email) = ''"
+  ).run();
+  await db.prepare(
+    "UPDATE users SET password_hash = '' WHERE password_hash IS NULL"
+  ).run();
+  await db.prepare(
+    "UPDATE users SET display_name = CASE WHEN email LIKE '%@%' THEN substr(email, 1, instr(email, '@') - 1) ELSE id END WHERE display_name IS NULL OR trim(display_name) = ''"
+  ).run();
+  await db.prepare(
+    "UPDATE users SET created_at = strftime('%s','now') WHERE created_at IS NULL"
+  ).run();
+  await db.prepare(
+    "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"
+  ).run();
+};
+
+const ensureSessionsSchema = async (db) => {
+  const sessionsTable = await db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'sessions'"
+  ).first();
+
+  if (!sessionsTable) {
+    await db.prepare(
+      `
+        CREATE TABLE sessions (
+          token TEXT PRIMARY KEY,
+          user_id TEXT NOT NULL,
+          expires_at INTEGER NOT NULL,
+          created_at INTEGER NOT NULL,
+          FOREIGN KEY (user_id) REFERENCES users(id)
+        )
+      `
+    ).run();
+  }
+
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_sessions_user_id ON sessions(user_id)"
+  ).run();
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_sessions_expires_at ON sessions(expires_at)"
+  ).run();
+};
+
+const nowUnix = () => Math.floor(Date.now() / 1000);
+
+const sessionHeaders = (expiresAt) =>
+  expiresAt ? { "X-Session-Expires-At": String(expiresAt) } : {};
+
+const createSession = async (db, userId) => {
+  const token = crypto.randomUUID().replace(/-/g, "");
+  const createdAt = nowUnix();
+  const expiresAt = createdAt + SESSION_TTL_SECONDS;
+
+  await db.prepare(
+    `
+      INSERT INTO sessions (token, user_id, expires_at, created_at)
+      VALUES (?, ?, ?, ?)
+    `
+  )
+    .bind(token, userId, expiresAt, createdAt)
+    .run();
+
+  return { token, expires_at: expiresAt };
+};
+
+const getSessionToken = (request) => {
+  const authHeader = request.headers.get("Authorization") || "";
+  if (!authHeader.startsWith("Bearer ")) {
+    return null;
+  }
+
+  const token = authHeader.slice(7).trim();
+  return token || null;
+};
+
+const getAuthenticatedUser = async (request, db) => {
+  const token = getSessionToken(request);
+  if (!token) {
+    throw new Response(JSON.stringify({ error: "Missing session token" }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  }
+
+  const session = await db.prepare(
+    `
+      SELECT s.user_id, s.expires_at, u.email, u.display_name
+      FROM sessions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.token = ?
+    `
+  )
+    .bind(token)
+    .first();
+
+  if (!session) {
+    throw new Response(JSON.stringify({ error: "Invalid session token" }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  }
+
+  if (session.expires_at <= nowUnix()) {
+    await db.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+    throw new Response(JSON.stringify({ error: "Session expired" }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  }
+
+  const refreshedExpiresAt = nowUnix() + SESSION_TTL_SECONDS;
+  await db.prepare("UPDATE sessions SET expires_at = ? WHERE token = ?")
+    .bind(refreshedExpiresAt, token)
+    .run();
+
+  return {
+    user: {
+      id: session.user_id,
+      email: session.email,
+      display_name: session.display_name
+    },
+    token,
+    expires_at: refreshedExpiresAt
+  };
 };
 
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
 
-    /* =========================
-       CORS PREFLIGHT
-       ========================= */
     if (request.method === "OPTIONS") {
       return new Response(null, {
         status: 204,
@@ -42,112 +223,220 @@ export default {
     }
 
     try {
-      /* =========================
-         HEALTH CHECK
-         ========================= */
       if (request.method === "GET" && url.pathname === "/health") {
         return json({ status: "ok" });
       }
 
-      /* =========================
-        GET ALL OUTINGS (FEED) ✅ AP-17
-        ========================= */
-      if (request.method === "GET" && url.pathname === "/outings") {
-        const currentUser = getUserId(request);
+      if (request.method === "POST" && url.pathname === "/auth/signup") {
+        await ensureUsersSchema(env.DB);
+        await ensureSessionsSchema(env.DB);
 
-        const result = await env.DB.prepare(`
-          SELECT o.*
-          FROM outings o
-          LEFT JOIN interest_requests ir
-            ON o.id = ir.outing_id
-            AND ir.requester_user_id = ?
+        const body = await request.json();
+        const email = String(body.email || "").trim().toLowerCase();
+        const password = String(body.password || "");
+        const display_name = String(body.display_name || "").trim();
 
-          WHERE
-            COALESCE(o.is_closed, 0) = 0
-            OR ir.requester_user_id IS NOT NULL
-            OR o.host_user_id = ?
+        if (!email || !password) {
+          return errorResponse("email and password are required", 400);
+        }
 
-          ORDER BY o.created_at DESC
-        `)
-          .bind(currentUser, currentUser) // ✅ bind twice
-          .all();
+        if (!isValidEmail(email)) {
+          return errorResponse("Please enter a valid email address", 400);
+        }
 
-        return json(result.results);
+        if (!isValidPassword(password)) {
+          return errorResponse("Password must be at least 8 characters", 400);
+        }
+
+        const existing = await env.DB.prepare(
+          "SELECT id FROM users WHERE email = ?"
+        )
+          .bind(email)
+          .first();
+
+        if (existing) {
+          return errorResponse("An account with this email already exists", 409);
+        }
+
+        const password_hash = await hashPassword(password);
+        const userId = crypto.randomUUID().replace(/-/g, "");
+        const safeDisplayName = display_name || email.split("@")[0];
+
+        await env.DB.prepare(
+          `
+            INSERT INTO users (id, email, password_hash, display_name, created_at)
+            VALUES (?, ?, ?, ?, strftime('%s','now'))
+          `
+        )
+          .bind(userId, email, password_hash, safeDisplayName)
+          .run();
+
+        const session = await createSession(env.DB, userId);
+
+        return json(
+          {
+            user: {
+              id: userId,
+              email,
+              display_name: safeDisplayName
+            },
+            token: session.token,
+            expires_at: session.expires_at
+          },
+          201
+        );
       }
 
-      /* =========================
-         CREATE OUTING (HOST)
-         ========================= */
+      if (request.method === "POST" && url.pathname === "/auth/login") {
+        await ensureUsersSchema(env.DB);
+        await ensureSessionsSchema(env.DB);
+
+        const body = await request.json();
+        const email = String(body.email || "").trim().toLowerCase();
+        const password = String(body.password || "");
+
+        if (!email || !password) {
+          return errorResponse("email and password are required", 400);
+        }
+
+        const user = await env.DB.prepare(
+          `
+            SELECT id, email, password_hash, display_name
+            FROM users
+            WHERE email = ?
+          `
+        )
+          .bind(email)
+          .first();
+
+        if (!user) {
+          return errorResponse("Invalid email or password", 401);
+        }
+
+        const submittedHash = await hashPassword(password);
+        if (submittedHash !== user.password_hash) {
+          return errorResponse("Invalid email or password", 401);
+        }
+
+        const session = await createSession(env.DB, user.id);
+
+        return json({
+          user: {
+            id: user.id,
+            email: user.email,
+            display_name: user.display_name
+          },
+          token: session.token,
+          expires_at: session.expires_at
+        });
+      }
+
+      if (request.method === "GET" && url.pathname === "/auth/session") {
+        await ensureUsersSchema(env.DB);
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+
+        return json(
+          {
+            user: auth.user,
+            token: auth.token,
+            expires_at: auth.expires_at
+          },
+          200,
+          sessionHeaders(auth.expires_at)
+        );
+      }
+
+      if (request.method === "POST" && url.pathname === "/auth/logout") {
+        await ensureSessionsSchema(env.DB);
+        const token = getSessionToken(request);
+
+        if (token) {
+          await env.DB.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+        }
+
+        return json({ message: "Logged out" });
+      }
+
+      if (request.method === "GET" && url.pathname === "/outings") {
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const currentUser = auth.user.id;
+
+        const result = await env.DB.prepare(
+          `
+            SELECT o.*
+            FROM outings o
+            LEFT JOIN interest_requests ir
+              ON o.id = ir.outing_id
+              AND ir.requester_user_id = ?
+            WHERE
+              COALESCE(o.is_closed, 0) = 0
+              OR ir.requester_user_id IS NOT NULL
+              OR o.host_user_id = ?
+            ORDER BY o.created_at DESC
+          `
+        )
+          .bind(currentUser, currentUser)
+          .all();
+
+        return json(result.results, 200, sessionHeaders(auth.expires_at));
+      }
+
       if (request.method === "POST" && url.pathname === "/outings") {
-        const host_user_id = getUserId(request);
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const host_user_id = auth.user.id;
         const body = await request.json();
 
-        // FRONTEND → BACKEND MAPPING (AP-2)
-        const {
-          title,
-          activity_type,
-          date_time,
-          location
-        } = body;
-
-        // For MVP, we hardcode outing_mode
+        const { title, activity_type, date_time, location } = body;
         const outing_mode = "in_person";
 
         if (!title || !activity_type || !date_time) {
-          return errorResponse(
-            "title, activity_type, and date_time are required",
-            400
-          );
+          return errorResponse("title, activity_type, and date_time are required", 400);
         }
 
-        await env.DB.prepare(`
-          INSERT INTO outings (
-            id,
-            title,
-            description,
-            outing_mode,
-            activity_type,
-            location,
-            virtual_link,
-            date_time,
-            host_user_id,
-            status,
-            is_closed,
-            created_at
-          )
-          VALUES (
-            lower(hex(randomblob(16))),
-            ?, NULL, ?, ?, ?, NULL, ?, ?, 'open', 0, strftime('%s','now')
-          )
-        `)
-          .bind(
-            title,
-            outing_mode,
-            activity_type,
-            location ?? null,
-            date_time,
-            host_user_id
-          )
+        await env.DB.prepare(
+          `
+            INSERT INTO outings (
+              id,
+              title,
+              description,
+              outing_mode,
+              activity_type,
+              location,
+              virtual_link,
+              date_time,
+              host_user_id,
+              status,
+              is_closed,
+              created_at
+            )
+            VALUES (
+              lower(hex(randomblob(16))),
+              ?, NULL, ?, ?, ?, NULL, ?, ?, 'open', 0, strftime('%s','now')
+            )
+          `
+        )
+          .bind(title, outing_mode, activity_type, location ?? null, date_time, host_user_id)
           .run();
 
-        return json({ message: "Outing created" }, 201);
+        return json({ message: "Outing created" }, 201, sessionHeaders(auth.expires_at));
       }
-      /* =========================
-        CLOSE OUTING (HOST ONLY)  ✅ AP-17
-        ========================= */
+
       if (
         request.method === "PATCH" &&
         url.pathname.startsWith("/outings/") &&
         url.pathname.endsWith("/close")
       ) {
-        const host_user_id = getUserId(request);
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const host_user_id = auth.user.id;
         const outing_id = url.pathname.split("/")[2];
 
-        // 1. Verify outing exists + belongs to host
-        const outing = await env.DB.prepare(`
-          SELECT * FROM outings
-          WHERE id = ?
-        `)
+        const outing = await env.DB.prepare(
+          "SELECT * FROM outings WHERE id = ?"
+        )
           .bind(outing_id)
           .first();
 
@@ -159,34 +448,28 @@ export default {
           return errorResponse("Forbidden", 403);
         }
 
-        // 2. Mark outing as closed
-        await env.DB.prepare(`
-          UPDATE outings
-          SET is_closed = 1
-          WHERE id = ?
-        `)
+        await env.DB.prepare(
+          "UPDATE outings SET is_closed = 1 WHERE id = ?"
+        )
           .bind(outing_id)
           .run();
 
-        return json({ message: "Outing closed successfully" });
+        return json({ message: "Outing closed successfully" }, 200, sessionHeaders(auth.expires_at));
       }
 
-      /* =========================
-         GET INTEREST REQUESTS (HOST ONLY)
-         ========================= */
       if (
         request.method === "GET" &&
         url.pathname.startsWith("/outings/") &&
         url.pathname.endsWith("/interest_requests")
       ) {
-        const currentUser = getUserId(request);
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const currentUser = auth.user.id;
         const outing_id = url.pathname.split("/")[2];
 
-        const outing = await env.DB.prepare(`
-          SELECT host_user_id
-          FROM outings
-          WHERE id = ?
-        `)
+        const outing = await env.DB.prepare(
+          "SELECT host_user_id FROM outings WHERE id = ?"
+        )
           .bind(outing_id)
           .first();
 
@@ -198,78 +481,77 @@ export default {
           return errorResponse("Forbidden", 403);
         }
 
-        const result = await env.DB.prepare(`
-          SELECT *
-          FROM interest_requests
-          WHERE outing_id = ?
-          ORDER BY created_at ASC
-        `)
+        const result = await env.DB.prepare(
+          `
+            SELECT *
+            FROM interest_requests
+            WHERE outing_id = ?
+            ORDER BY created_at ASC
+          `
+        )
           .bind(outing_id)
           .all();
 
-        return json(result.results);
+        return json(result.results, 200, sessionHeaders(auth.expires_at));
       }
 
-      /* =========================
-         CREATE INTEREST REQUEST
-         ========================= */
       if (request.method === "POST" && url.pathname === "/interest_requests") {
-      const requester_user_id = getUserId(request);
-      const body = await request.json();
-      const { outing_id } = body;
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const requester_user_id = auth.user.id;
+        const body = await request.json();
+        const { outing_id } = body;
 
-      if (!outing_id) {
-        return errorResponse("outing_id is required", 400);
-      }
+        if (!outing_id) {
+          return errorResponse("outing_id is required", 400);
+        }
 
-      // ✅ AP-17: Block interest if outing is closed
-      const outing = await env.DB.prepare(`
-        SELECT is_closed
-        FROM outings
-        WHERE id = ?
-      `)
-        .bind(outing_id)
-        .first();
+        const outing = await env.DB.prepare(
+          "SELECT is_closed FROM outings WHERE id = ?"
+        )
+          .bind(outing_id)
+          .first();
 
-      if (!outing) {
-        return errorResponse("Outing not found", 404);
-      }
+        if (!outing) {
+          return errorResponse("Outing not found", 404);
+        }
 
-      if (outing.is_closed === 1) {
-        return errorResponse(
-          "Outing is closed. No new requests allowed.",
-          400
-        );
-      }
+        if (outing.is_closed === 1) {
+          return errorResponse("Outing is closed. No new requests allowed.", 400);
+        }
 
-        await env.DB.prepare(`
-          INSERT INTO interest_requests (
-            id,
-            outing_id,
-            requester_user_id,
-            status,
-            created_at
-          )
-          VALUES (
-            lower(hex(randomblob(16))),
-            ?, ?, 'pending', strftime('%s','now')
-          )
-        `)
+        await env.DB.prepare(
+          `
+            INSERT INTO interest_requests (
+              id,
+              outing_id,
+              requester_user_id,
+              status,
+              created_at
+            )
+            VALUES (
+              lower(hex(randomblob(16))),
+              ?, ?, 'pending', strftime('%s','now')
+            )
+          `
+        )
           .bind(outing_id, requester_user_id)
           .run();
 
         return json(
           { outing_id, requester_user_id, status: "pending" },
-          201
+          201,
+          sessionHeaders(auth.expires_at)
         );
       }
-      /* =========================
-   GET MY INTEREST REQUESTS (GUEST)
-   ========================= */
-        if (request.method === "GET" && url.pathname === "/interest_requests") {
-          const requester_user_id = getUserId(request);
 
-          const result = await env.DB.prepare(`
+      if (request.method === "GET" && url.pathname === "/interest_requests") {
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const requester_user_id = auth.user.id;
+
+        const result = await env.DB.prepare(
+          `
             SELECT
               ir.id,
               ir.outing_id,
@@ -284,60 +566,57 @@ export default {
             JOIN outings o ON ir.outing_id = o.id
             WHERE ir.requester_user_id = ?
             ORDER BY ir.created_at DESC
-          `)
-            .bind(requester_user_id)
-            .all();
+          `
+        )
+          .bind(requester_user_id)
+          .all();
 
-          return json(result.results);
-        }
+        return json(result.results, 200, sessionHeaders(auth.expires_at));
+      }
 
-
-      /* =========================
-         ACCEPT / REJECT REQUEST
-         ========================= */
       if (
         request.method === "PATCH" &&
         url.pathname.startsWith("/interest_requests/")
       ) {
-        const currentUser = getUserId(request);
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const currentUser = auth.user.id;
         const interest_request_id = url.pathname.split("/")[2];
         const body = await request.json();
         const { status } = body;
 
         if (!["accepted", "rejected"].includes(status)) {
-          return errorResponse(
-            "status must be 'accepted' or 'rejected'",
-            400
-          );
+          return errorResponse("status must be 'accepted' or 'rejected'", 400);
         }
 
-        const result = await env.DB.prepare(`
-          UPDATE interest_requests
-          SET status = ?
-          WHERE id = ?
-            AND status = 'pending'
-            AND outing_id IN (
-              SELECT id
-              FROM outings
-              WHERE host_user_id = ?
-            )
-        `)
+        const result = await env.DB.prepare(
+          `
+            UPDATE interest_requests
+            SET status = ?
+            WHERE id = ?
+              AND status = 'pending'
+              AND outing_id IN (
+                SELECT id
+                FROM outings
+                WHERE host_user_id = ?
+              )
+          `
+        )
           .bind(status, interest_request_id, currentUser)
           .run();
 
         if (result.changes === 0) {
-          return errorResponse(
-            "Not found, forbidden, or already decided",
-            409
-          );
+          return errorResponse("Not found, forbidden, or already decided", 409);
         }
 
-        return json({ id: interest_request_id, status });
+        return json({ id: interest_request_id, status }, 200, sessionHeaders(auth.expires_at));
       }
 
       return errorResponse("Not Found", 404);
     } catch (err) {
-      if (err instanceof Response) return err;
+      if (err instanceof Response) {
+        return err;
+      }
       return errorResponse("Internal Server Error", 500);
     }
   }

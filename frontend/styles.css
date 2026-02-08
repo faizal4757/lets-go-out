@@ -9,6 +9,12 @@ body {
   padding: 20px;
 }
 
+input,
+select {
+  padding: 6px 8px;
+  margin-bottom: 10px;
+}
+
 /* ------------------------------
    Buttons
 ------------------------------ */
@@ -31,6 +37,26 @@ button:hover:not(:disabled) {
 button:disabled {
   cursor: not-allowed;
   opacity: 1;
+}
+
+.auth-section {
+  max-width: 460px;
+  margin-bottom: 24px;
+}
+
+.auth-toggle {
+  margin-bottom: 14px;
+}
+
+.auth-toggle button {
+  margin-left: 0;
+  margin-right: 8px;
+}
+
+.auth-form {
+  border: 1px solid #444;
+  padding: 14px;
+  border-radius: 8px;
 }
 
 /* ------------------------------

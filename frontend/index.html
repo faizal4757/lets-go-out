@@ -5,81 +5,102 @@
   <title>Lets Go Out</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
-
 <body>
   <h1>Lets Go Out</h1>
 
-  <div style="margin-bottom: 20px;">
-    <strong>Current User:</strong>
-    <span id="current-user-label"></span>
-    <br /><br />
-
-    <label>Switch User:</label>
-    <select id="user-selector">
-      <option value="user_1">user_1 (Host)</option>
-      <option value="user_2">user_2</option>
-      <option value="user_3">user_3</option>
-    </select>
-  </div>
-
-  <!-- AP-7: Global backend error display -->
   <p id="global-error" class="error hidden"></p>
-
-  <hr />
-
-  <h2>Create an outing</h2>
-
-  <form id="create-outing-form">
-    <div>
-      <label>Title</label><br />
-      <input type="text" id="title" required />
-    </div>
-
-    <div>
-      <label>Type</label><br />
-      <select id="type">
-        <option value="movie">Movie</option>
-        <option value="coffee">Coffee</option>
-        <option value="sports">Sports</option>
-      </select>
-    </div>
-
-    <div>
-      <label>Date & Time</label><br />
-      <input type="datetime-local" id="date_time" required />
-    </div>
-
-    <div>
-      <label>Location</label><br />
-      <input type="text" id="location" />
-    </div>
-
-    <button type="submit">Create Outing</button>
-  </form>
-
   <p id="message" class="success hidden"></p>
 
-  <hr />
+  <section id="auth-section" class="auth-section hidden">
+    <div class="auth-toggle">
+      <button id="show-signup-btn" type="button">Sign up</button>
+      <button id="show-login-btn" type="button">Log in</button>
+    </div>
 
-  <h2>Available outings</h2>
-  <ul id="outings-list"></ul>
+    <form id="signup-form" class="auth-form">
+      <h2>Sign up</h2>
+      <div>
+        <label>Email</label><br />
+        <input type="email" id="signup-email" required />
+      </div>
+      <div>
+        <label>Password</label><br />
+        <input type="password" id="signup-password" minlength="8" required />
+      </div>
+      <div>
+        <label>Display name (optional)</label><br />
+        <input type="text" id="signup-display-name" />
+      </div>
+      <button type="submit">Create account</button>
+    </form>
 
-  <hr />
+    <form id="login-form" class="auth-form hidden">
+      <h2>Log in</h2>
+      <div>
+        <label>Email</label><br />
+        <input type="email" id="login-email" required />
+      </div>
+      <div>
+        <label>Password</label><br />
+        <input type="password" id="login-password" required />
+      </div>
+      <button type="submit">Log in</button>
+    </form>
+  </section>
 
-  <h2>Interest requests (for my outings)</h2>
-  <ul id="requests-list">
-    <li>Select one of your outings</li>
-  </ul>
-  <hr />
+  <section id="app-section" class="hidden">
+    <div style="margin-bottom: 20px;">
+      <strong>Current User:</strong>
+      <span id="current-user-label"></span>
+      <button id="logout-btn" type="button">Log out</button>
+    </div>
 
-<hr />
+    <hr />
 
-<h2>My interest requests</h2>
-<ul id="my-requests-list">
-  <li>No requests yet</li>
-</ul>
+    <h2>Create an outing</h2>
+    <form id="create-outing-form">
+      <div>
+        <label>Title</label><br />
+        <input type="text" id="title" required />
+      </div>
+      <div>
+        <label>Type</label><br />
+        <select id="type">
+          <option value="movie">Movie</option>
+          <option value="coffee">Coffee</option>
+          <option value="sports">Sports</option>
+        </select>
+      </div>
+      <div>
+        <label>Date and Time</label><br />
+        <input type="datetime-local" id="date_time" required />
+      </div>
+      <div>
+        <label>Location</label><br />
+        <input type="text" id="location" />
+      </div>
+      <button type="submit">Create Outing</button>
+    </form>
 
+    <hr />
 
+    <h2>Available outings</h2>
+    <ul id="outings-list"></ul>
+
+    <hr />
+
+    <h2>Interest requests (for my outings)</h2>
+    <ul id="requests-list">
+      <li>Select one of your outings</li>
+    </ul>
+
+    <hr />
+
+    <h2>My interest requests</h2>
+    <ul id="my-requests-list">
+      <li>No requests yet</li>
+    </ul>
+  </section>
 
   <script src="state.js"></script>
   <script src="api.js"></script>

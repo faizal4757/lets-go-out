@@ -5,5 +5,5 @@ Built with plain HTML, CSS, and JS.
 
 Purpose:
 - Validate core outing flow
-- Use X-User-Id header for identity simulation
+- Persist login with session token + expiry
 - Disposable UI (React later)
