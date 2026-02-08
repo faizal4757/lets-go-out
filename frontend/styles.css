@@ -133,6 +133,18 @@ li {
   white-space: pre-line;
 }
 
+.outing-edit-form {
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 10px;
+  margin-top: 10px;
+  max-width: 520px;
+}
+
+.outing-edit-form button {
+  margin-left: 0;
+}
+
 /* Closed tag (host feed) */
 .closed-tag {
   margin-left: 12px;

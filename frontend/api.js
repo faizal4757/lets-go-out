@@ -95,6 +95,12 @@ window.createOuting = (payload) =>
 
 window.getOutings = () => apiRequest("/outings");
 
+window.updateOuting = (outingId, payload) =>
+  apiRequest(`/outings/${outingId}`, {
+    method: "PATCH",
+    body: JSON.stringify(payload)
+  });
+
 window.expressInterest = (outingId) =>
   apiRequest("/interest_requests", {
     method: "POST",

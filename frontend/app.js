@@ -82,6 +82,21 @@ function createButton(label, onClick, className) {
   return button;
 }
 
+function toDateTimeLocalValue(unixSeconds) {
+  const date = new Date(Number(unixSeconds) * 1000);
+  if (Number.isNaN(date.getTime())) {
+    return "";
+  }
+
+  const pad = (value) => String(value).padStart(2, "0");
+  const year = date.getFullYear();
+  const month = pad(date.getMonth() + 1);
+  const day = pad(date.getDate());
+  const hours = pad(date.getHours());
+  const minutes = pad(date.getMinutes());
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
 function showAuthMode(mode) {
   if (mode === "signup") {
     signupForm.classList.remove("hidden");
@@ -345,6 +360,109 @@ async function loadOutings() {
       buttonRow.appendChild(hostProfileBtn);
 
       if (outing.host_user_id === window.currentUser) {
+        if (outing.is_closed === 0) {
+          const editBtn = createButton("Edit outing", () => {
+            const existingForm = li.querySelector(".outing-edit-form");
+            if (existingForm) {
+              existingForm.classList.toggle("hidden");
+              return;
+            }
+
+            const editForm = document.createElement("form");
+            editForm.className = "outing-edit-form";
+
+            const titleWrap = document.createElement("div");
+            const titleLabel = document.createElement("label");
+            titleLabel.textContent = "Title";
+            const titleBreak = document.createElement("br");
+            const titleInput = document.createElement("input");
+            titleInput.type = "text";
+            titleInput.name = "title";
+            titleInput.required = true;
+            titleInput.value = outing.title || "";
+            titleWrap.append(titleLabel, titleBreak, titleInput);
+
+            const typeWrap = document.createElement("div");
+            const typeLabel = document.createElement("label");
+            typeLabel.textContent = "Type";
+            const typeBreak = document.createElement("br");
+            const typeSelect = document.createElement("select");
+            typeSelect.name = "activity_type";
+            const activityOptions = ["movie", "coffee", "sports"];
+            if (outing.activity_type && !activityOptions.includes(outing.activity_type)) {
+              activityOptions.push(outing.activity_type);
+            }
+            activityOptions.forEach((option) => {
+              const optionEl = document.createElement("option");
+              optionEl.value = option;
+              optionEl.textContent = option;
+              if (option === outing.activity_type) {
+                optionEl.selected = true;
+              }
+              typeSelect.appendChild(optionEl);
+            });
+            typeWrap.append(typeLabel, typeBreak, typeSelect);
+
+            const dateWrap = document.createElement("div");
+            const dateLabel = document.createElement("label");
+            dateLabel.textContent = "Date and Time";
+            const dateBreak = document.createElement("br");
+            const dateInput = document.createElement("input");
+            dateInput.type = "datetime-local";
+            dateInput.name = "date_time";
+            dateInput.required = true;
+            dateInput.value = toDateTimeLocalValue(outing.date_time);
+            dateWrap.append(dateLabel, dateBreak, dateInput);
+
+            const locationWrap = document.createElement("div");
+            const locationLabel = document.createElement("label");
+            locationLabel.textContent = "Location";
+            const locationBreak = document.createElement("br");
+            const locationInput = document.createElement("input");
+            locationInput.type = "text";
+            locationInput.name = "location";
+            locationInput.value = outing.location || "";
+            locationWrap.append(locationLabel, locationBreak, locationInput);
+
+            const saveButton = document.createElement("button");
+            saveButton.type = "submit";
+            saveButton.textContent = "Save changes";
+
+            editForm.append(titleWrap, typeWrap, dateWrap, locationWrap, saveButton);
+
+            editForm.addEventListener("submit", async (event) => {
+              event.preventDefault();
+              clearError();
+              const formData = new FormData(editForm);
+              const rawDate = String(formData.get("date_time") || "");
+              const unixDate = Math.floor(new Date(rawDate).getTime() / 1000);
+
+              if (!Number.isFinite(unixDate)) {
+                showError("Please provide a valid date and time.");
+                return;
+              }
+
+              const payload = {
+                title: String(formData.get("title") || "").trim(),
+                activity_type: String(formData.get("activity_type") || "").trim(),
+                date_time: unixDate,
+                location: String(formData.get("location") || "").trim()
+              };
+
+              try {
+                await updateOuting(outing.id, payload);
+                showSuccess("Outing updated successfully.");
+                await loadOutings();
+              } catch (err) {
+                showError(err.message);
+              }
+            });
+
+            li.appendChild(editForm);
+          });
+          buttonRow.appendChild(editBtn);
+        }
+
         const viewBtn = createButton("View requests", () => loadRequests(outing.id));
         buttonRow.appendChild(viewBtn);
 

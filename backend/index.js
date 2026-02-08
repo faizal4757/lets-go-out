@@ -1,6 +1,6 @@
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, PATCH, OPTIONS",
+  "Access-Control-Allow-Methods": "GET, POST, PATCH, DELETE, OPTIONS",
   "Access-Control-Allow-Headers": "Content-Type, Authorization",
   "Access-Control-Expose-Headers": "X-Session-Expires-At"
 };
@@ -577,6 +577,128 @@ export default {
           .run();
 
         return json({ message: "Outing created" }, 201, sessionHeaders(auth.expires_at));
+      }
+
+      if (
+        request.method === "PATCH" &&
+        url.pathname.startsWith("/outings/") &&
+        url.pathname.split("/").filter(Boolean).length === 2
+      ) {
+        await ensureSessionsSchema(env.DB);
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const host_user_id = auth.user.id;
+        const outing_id = url.pathname.split("/")[2];
+        const body = await request.json();
+
+        const nextTitle = body.title === undefined ? undefined : String(body.title).trim();
+        const nextActivityType =
+          body.activity_type === undefined ? undefined : String(body.activity_type).trim();
+        const nextDateTime =
+          body.date_time === undefined ? undefined : Number(body.date_time);
+        const nextLocation =
+          body.location === undefined ? undefined : normalizeOptionalText(body.location);
+
+        const hasAtLeastOneField =
+          body.title !== undefined ||
+          body.activity_type !== undefined ||
+          body.date_time !== undefined ||
+          body.location !== undefined;
+
+        if (!hasAtLeastOneField) {
+          return errorResponse("At least one editable field is required", 400);
+        }
+
+        if (body.title !== undefined && !nextTitle) {
+          return errorResponse("title cannot be empty", 400);
+        }
+
+        if (body.activity_type !== undefined && !nextActivityType) {
+          return errorResponse("activity_type cannot be empty", 400);
+        }
+
+        if (
+          body.date_time !== undefined &&
+          (!Number.isFinite(nextDateTime) || !Number.isInteger(nextDateTime) || nextDateTime <= 0)
+        ) {
+          return errorResponse("date_time must be a valid Unix timestamp", 400);
+        }
+
+        const outing = await env.DB.prepare(
+          "SELECT id, host_user_id, is_closed FROM outings WHERE id = ?"
+        )
+          .bind(outing_id)
+          .first();
+
+        if (!outing) {
+          return errorResponse("Outing not found", 404);
+        }
+
+        if (outing.host_user_id !== host_user_id) {
+          return errorResponse("Forbidden", 403);
+        }
+
+        if (outing.is_closed === 1) {
+          return errorResponse("Closed outings cannot be edited", 409);
+        }
+
+        const interestCount = await env.DB.prepare(
+          "SELECT COUNT(*) AS count FROM interest_requests WHERE outing_id = ?"
+        )
+          .bind(outing_id)
+          .first();
+
+        if (Number(interestCount?.count || 0) > 0) {
+          return errorResponse(
+            "This outing cannot be edited because it already has interest requests. Delete this outing and create a new one.",
+            409
+          );
+        }
+
+        const shouldUpdateTitle = body.title !== undefined;
+        const shouldUpdateActivityType = body.activity_type !== undefined;
+        const shouldUpdateDateTime = body.date_time !== undefined;
+        const shouldUpdateLocation = body.location !== undefined;
+
+        await env.DB.prepare(
+          `
+            UPDATE outings
+            SET
+              title = CASE WHEN ? THEN ? ELSE title END,
+              activity_type = CASE WHEN ? THEN ? ELSE activity_type END,
+              date_time = CASE WHEN ? THEN ? ELSE date_time END,
+              location = CASE WHEN ? THEN ? ELSE location END
+            WHERE id = ?
+          `
+        )
+          .bind(
+            shouldUpdateTitle ? 1 : 0,
+            nextTitle,
+            shouldUpdateActivityType ? 1 : 0,
+            nextActivityType,
+            shouldUpdateDateTime ? 1 : 0,
+            nextDateTime,
+            shouldUpdateLocation ? 1 : 0,
+            nextLocation,
+            outing_id
+          )
+          .run();
+
+        const updatedOuting = await env.DB.prepare(
+          `
+            SELECT o.*, u.display_name AS host_display_name
+            FROM outings o
+            JOIN users u ON u.id = o.host_user_id
+            WHERE o.id = ?
+          `
+        )
+          .bind(outing_id)
+          .first();
+
+        return json(
+          { message: "Outing updated successfully", outing: updatedOuting },
+          200,
+          sessionHeaders(auth.expires_at)
+        );
       }
 
       if (
