@@ -60,3 +60,13 @@ CREATE TABLE IF NOT EXISTS interest_requests (
   FOREIGN KEY (outing_id) REFERENCES outings(id),
   FOREIGN KEY (requester_user_id) REFERENCES users(id)
 );
+
+-- =========================
+-- DELETED IDENTITIES
+-- =========================
+CREATE TABLE IF NOT EXISTS deleted_identities (
+  email TEXT PRIMARY KEY,
+  deleted_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_deleted_identities_deleted_at ON deleted_identities(deleted_at);

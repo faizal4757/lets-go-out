@@ -109,6 +109,11 @@ window.updateMyProfile = (payload) =>
     body: JSON.stringify(payload)
   });
 
+window.deleteMyAccount = () =>
+  apiRequest("/profile", {
+    method: "DELETE"
+  });
+
 window.getUserProfile = (userId) => apiRequest(`/users/${userId}/profile`);
 
 window.createOuting = (payload) =>

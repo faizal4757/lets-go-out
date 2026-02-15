@@ -86,6 +86,12 @@
       <button type="submit">Save profile</button>
     </form>
 
+    <div class="danger-zone">
+      <h3>Danger Zone</h3>
+      <p>Once you delete your account, there is no going back. Your email will be permanently blocked and cannot be reused.</p>
+      <button id="delete-account-btn" type="button" class="danger-button">Delete Account Permanently</button>
+    </div>
+
     <hr />
 
     <h2>Create an outing</h2>
@@ -127,14 +133,14 @@
 
     <h2>Interest requests (for my outings)</h2>
     <ul id="requests-list">
-      <li>Select one of your outings</li>
+      <li class="empty-state">Select one of your outings to view interest requests</li>
     </ul>
 
     <hr />
 
     <h2>My interest requests</h2>
     <ul id="my-requests-list">
-      <li>No requests yet</li>
+      <li class="empty-state">You haven't expressed interest in any outings yet. Browse the available outings above!</li>
     </ul>
   </section>
 

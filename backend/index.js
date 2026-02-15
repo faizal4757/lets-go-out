@@ -232,6 +232,27 @@ const ensureInterestRequestsSchema = async (db) => {
   }
 };
 
+const ensureDeletedIdentitiesSchema = async (db) => {
+  const deletedIdentitiesTable = await db.prepare(
+    "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'deleted_identities'"
+  ).first();
+
+  if (!deletedIdentitiesTable) {
+    await db.prepare(
+      `
+        CREATE TABLE deleted_identities (
+          email TEXT PRIMARY KEY,
+          deleted_at INTEGER NOT NULL
+        )
+      `
+    ).run();
+  }
+
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_deleted_identities_deleted_at ON deleted_identities(deleted_at)"
+  ).run();
+};
+
 let schemaInitialized = false;
 const ensureSchema = async (db) => {
   if (schemaInitialized) return;
@@ -239,6 +260,7 @@ const ensureSchema = async (db) => {
   await ensureSessionsSchema(db);
   await ensureOutingsSchema(db);
   await ensureInterestRequestsSchema(db);
+  await ensureDeletedIdentitiesSchema(db);
   schemaInitialized = true;
 };
 
@@ -381,6 +403,20 @@ export default {
           return errorResponse("Password must be at least 8 characters", 400);
         }
 
+        // Check if this identity has been permanently deleted
+        const deletedIdentity = await env.DB.prepare(
+          "SELECT email FROM deleted_identities WHERE email = ?"
+        )
+          .bind(email)
+          .first();
+
+        if (deletedIdentity) {
+          return errorResponse(
+            "This account has been permanently deleted and cannot be recreated.",
+            403
+          );
+        }
+
         const existing = await env.DB.prepare(
           "SELECT id FROM users WHERE email = ?"
         )
@@ -427,6 +463,20 @@ export default {
 
         if (!email || !password) {
           return errorResponse("email and password are required", 400);
+        }
+
+        // Check if this identity has been permanently deleted
+        const deletedIdentity = await env.DB.prepare(
+          "SELECT email FROM deleted_identities WHERE email = ?"
+        )
+          .bind(email)
+          .first();
+
+        if (deletedIdentity) {
+          return errorResponse(
+            "This account has been permanently deleted and cannot be recreated.",
+            403
+          );
         }
 
         const user = await env.DB.prepare(
@@ -549,6 +599,48 @@ export default {
           .first();
 
         return json({ user: userPayload(updatedUser) }, 200, sessionHeaders(auth.expires_at));
+      }
+
+      if (request.method === "DELETE" && url.pathname === "/profile") {
+        const auth = await getAuthenticatedUser(request, env.DB);
+        const userId = auth.user.id;
+        const userEmail = auth.user.email.toLowerCase();
+
+        // Delete all user's sessions
+        await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?")
+          .bind(userId)
+          .run();
+
+        // Delete all interest requests made by the user
+        await env.DB.prepare("DELETE FROM interest_requests WHERE requester_user_id = ?")
+          .bind(userId)
+          .run();
+
+        // Delete all interest requests for the user's outings
+        await env.DB.prepare(
+          "DELETE FROM interest_requests WHERE outing_id IN (SELECT id FROM outings WHERE host_user_id = ?)"
+        )
+          .bind(userId)
+          .run();
+
+        // Delete all outings hosted by the user
+        await env.DB.prepare("DELETE FROM outings WHERE host_user_id = ?")
+          .bind(userId)
+          .run();
+
+        // Add email to deleted_identities to prevent reuse
+        await env.DB.prepare(
+          "INSERT OR IGNORE INTO deleted_identities (email, deleted_at) VALUES (?, ?)"
+        )
+          .bind(userEmail, nowUnix())
+          .run();
+
+        // Delete the user record
+        await env.DB.prepare("DELETE FROM users WHERE id = ?")
+          .bind(userId)
+          .run();
+
+        return json({ message: "Account permanently deleted" });
       }
 
       if (

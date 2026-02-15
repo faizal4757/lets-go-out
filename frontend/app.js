@@ -28,8 +28,10 @@ const profileDislikesInput = document.getElementById("profile-dislikes");
 const profileInterestsInput = document.getElementById("profile-interests");
 const hostProfilePanel = document.getElementById("host-profile-panel");
 const hostProfileDetails = document.getElementById("host-profile-details");
+const deleteAccountBtn = document.getElementById("delete-account-btn");
 
 let myInterestStatusByOuting = {};
+let outingInterestRequestCounts = {};
 
 const STATUS_UI = {
   pending: {
@@ -200,7 +202,7 @@ async function renderAuthState() {
   hideHostProfilePanel();
   await loadMyProfile();
 
-  requestsListEl.innerHTML = "<li>Select one of your outings</li>";
+  requestsListEl.innerHTML = '<li class="empty-state">Select one of your outings to view interest requests</li>';
   await loadMyRequests();
   await loadOutings();
 }
@@ -311,6 +313,50 @@ profileForm.addEventListener("submit", async (e) => {
   }
 });
 
+deleteAccountBtn.addEventListener("click", async () => {
+  clearError();
+
+  const confirmMessage = 
+    "Are you ABSOLUTELY sure you want to delete your account?\n\n" +
+    "This will:\n" +
+    "• Permanently delete your profile\n" +
+    "• Delete all your outings\n" +
+    "• Delete all your interest requests\n" +
+    "• Block your email from future sign-ups\n\n" +
+    "This action CANNOT be undone.";
+
+  if (!confirm(confirmMessage)) {
+    return;
+  }
+
+  const finalConfirm = confirm(
+    "Last chance! Type 'DELETE' in the next prompt to confirm.\n\n" +
+    "Click OK to proceed."
+  );
+
+  if (!finalConfirm) {
+    return;
+  }
+
+  const typedConfirmation = prompt("Type DELETE to confirm account deletion:");
+
+  if (typedConfirmation !== "DELETE") {
+    showError("Account deletion cancelled. You must type DELETE exactly.");
+    return;
+  }
+
+  try {
+    await deleteMyAccount();
+    setCurrentUser(null);
+    showSuccess("Account deleted successfully. You will be logged out.");
+    setTimeout(async () => {
+      await renderAuthState();
+    }, 2000);
+  } catch (err) {
+    showError(err.message);
+  }
+});
+
 form.addEventListener("submit", async (e) => {
   e.preventDefault();
   clearError();
@@ -347,6 +393,25 @@ async function loadOutings() {
   try {
     const outings = await getOutings();
 
+    if (outings.length === 0) {
+      outingsListEl.innerHTML = '<li class="empty-state">No outings available yet. Create one to get started!</li>';
+      return;
+    }
+
+    // Fetch interest request counts for user's own outings
+    outingInterestRequestCounts = {};
+    const myOutings = outings.filter(o => o.host_user_id === window.currentUser);
+    await Promise.all(
+      myOutings.map(async (outing) => {
+        try {
+          const requests = await getInterestRequests(outing.id);
+          outingInterestRequestCounts[outing.id] = requests.length;
+        } catch (err) {
+          outingInterestRequestCounts[outing.id] = 0;
+        }
+      })
+    );
+
     outings.forEach((outing) => {
       const li = document.createElement("li");
 
@@ -361,6 +426,7 @@ async function loadOutings() {
 
       if (outing.host_user_id === window.currentUser) {
         if (outing.is_closed === 0) {
+          const hasRequests = outingInterestRequestCounts[outing.id] > 0;
           const editBtn = createButton("Edit outing", () => {
             const existingForm = li.querySelector(".outing-edit-form");
             if (existingForm) {
@@ -460,6 +526,12 @@ async function loadOutings() {
 
             li.appendChild(editForm);
           });
+          
+          if (hasRequests) {
+            editBtn.disabled = true;
+            editBtn.title = "This outing already has interest requests. Editing is not allowed. Please delete this outing and create a new one.";
+          }
+          
           buttonRow.appendChild(editBtn);
         }
 
@@ -532,7 +604,7 @@ async function loadRequests(outingId) {
     const requests = await getInterestRequests(outingId);
 
     if (requests.length === 0) {
-      requestsListEl.innerHTML = "<li>No requests yet</li>";
+      requestsListEl.innerHTML = '<li class="empty-state">No one has expressed interest yet. Share your outing!</li>';
       return;
     }
 
@@ -586,7 +658,7 @@ async function loadMyRequests() {
     });
 
     if (requests.length === 0) {
-      myRequestsListEl.innerHTML = "<li>No requests yet</li>";
+      myRequestsListEl.innerHTML = '<li class="empty-state">You haven\'t expressed interest in any outings yet. Browse the available outings above!</li>';
       return;
     }
 
