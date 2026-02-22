@@ -317,20 +317,20 @@ deleteAccountBtn.addEventListener("click", async () => {
   clearError();
 
   const confirmMessage = 
-    "Are you ABSOLUTELY sure you want to delete your account?\n\n" +
+    "Are you sure you want to deactivate your account?\n\n" +
     "This will:\n" +
-    "• Permanently delete your profile\n" +
-    "• Delete all your outings\n" +
-    "• Delete all your interest requests\n" +
-    "• Block your email from future sign-ups\n\n" +
-    "This action CANNOT be undone.";
+    "• Mark your profile as inactive\n" +
+    "• Keep your past activity visible where needed\n" +
+    "• Close your hosted outings\n" +
+    "• Log you out immediately\n\n" +
+    "You can reactivate by logging in again.";
 
   if (!confirm(confirmMessage)) {
     return;
   }
 
   const finalConfirm = confirm(
-    "Last chance! Type 'DELETE' in the next prompt to confirm.\n\n" +
+    "Last chance! Type 'DEACTIVATE' in the next prompt to confirm.\n\n" +
     "Click OK to proceed."
   );
 
@@ -338,17 +338,17 @@ deleteAccountBtn.addEventListener("click", async () => {
     return;
   }
 
-  const typedConfirmation = prompt("Type DELETE to confirm account deletion:");
+  const typedConfirmation = prompt("Type DEACTIVATE to confirm account deactivation:");
 
-  if (typedConfirmation !== "DELETE") {
-    showError("Account deletion cancelled. You must type DELETE exactly.");
+  if (typedConfirmation !== "DEACTIVATE") {
+    showError("Account deactivation cancelled. You must type DEACTIVATE exactly.");
     return;
   }
 
   try {
     await deleteMyAccount();
     setCurrentUser(null);
-    showSuccess("Account deleted successfully. You will be logged out.");
+    showSuccess("Account deactivated successfully. You have been logged out.");
     setTimeout(async () => {
       await renderAuthState();
     }, 2000);
@@ -610,9 +610,18 @@ async function loadRequests(outingId) {
 
     requests.forEach((req) => {
       const li = document.createElement("li");
+      const isRequesterActive = req.requester_is_active !== false;
+      const inactiveMessage = req.inactive_message || "This user is no longer active in the system.";
+
       li.textContent = `User: ${req.requester_user_id} | Status: ${req.status}`;
 
-      if (req.status === "pending") {
+      if (!isRequesterActive) {
+        const inactiveNote = document.createElement("div");
+        inactiveNote.textContent = inactiveMessage;
+        li.appendChild(inactiveNote);
+      }
+
+      if (req.status === "pending" && isRequesterActive) {
         const acceptBtn = createButton("Accept", async () => {
           clearError();
           try {

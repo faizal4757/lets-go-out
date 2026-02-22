@@ -10,8 +10,12 @@ CREATE TABLE IF NOT EXISTS users (
   likes TEXT,
   dislikes TEXT,
   interests TEXT,
+  is_active INTEGER NOT NULL DEFAULT 1,
+  deactivated_at INTEGER,
   created_at INTEGER NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active);
 
 -- =========================
 -- SESSIONS

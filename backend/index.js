@@ -54,7 +54,8 @@ const userPayload = (user) => ({
   age: user.age ?? null,
   likes: user.likes ?? null,
   dislikes: user.dislikes ?? null,
-  interests: user.interests ?? null
+  interests: user.interests ?? null,
+  is_active: user.is_active === undefined ? true : Number(user.is_active) === 1
 });
 
 const toHex = (bytes) =>
@@ -85,6 +86,8 @@ const ensureUsersSchema = async (db) => {
           likes TEXT,
           dislikes TEXT,
           interests TEXT,
+          is_active INTEGER NOT NULL DEFAULT 1,
+          deactivated_at INTEGER,
           created_at INTEGER NOT NULL
         )
       `
@@ -127,6 +130,14 @@ const ensureUsersSchema = async (db) => {
     await db.prepare("ALTER TABLE users ADD COLUMN interests TEXT").run();
   }
 
+  if (!columns.has("is_active")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN is_active INTEGER NOT NULL DEFAULT 1").run();
+  }
+
+  if (!columns.has("deactivated_at")) {
+    await db.prepare("ALTER TABLE users ADD COLUMN deactivated_at INTEGER").run();
+  }
+
   await db.prepare(
     "UPDATE users SET email = lower(id) || '@legacy.local' WHERE email IS NULL OR trim(email) = ''"
   ).run();
@@ -140,7 +151,16 @@ const ensureUsersSchema = async (db) => {
     "UPDATE users SET created_at = strftime('%s','now') WHERE created_at IS NULL"
   ).run();
   await db.prepare(
+    "UPDATE users SET is_active = 1 WHERE is_active IS NULL"
+  ).run();
+  await db.prepare(
+    "UPDATE users SET deactivated_at = NULL WHERE is_active = 1"
+  ).run();
+  await db.prepare(
     "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email ON users(email)"
+  ).run();
+  await db.prepare(
+    "CREATE INDEX IF NOT EXISTS idx_users_is_active ON users(is_active)"
   ).run();
 };
 
@@ -315,7 +335,7 @@ const getAuthenticatedUser = async (request, db) => {
 
   const session = await db.prepare(
     `
-      SELECT s.user_id, s.expires_at, u.email, u.display_name, u.age, u.likes, u.dislikes, u.interests
+      SELECT s.user_id, s.expires_at, u.email, u.display_name, u.age, u.likes, u.dislikes, u.interests, u.is_active
       FROM sessions s
       JOIN users u ON u.id = s.user_id
       WHERE s.token = ?
@@ -345,6 +365,18 @@ const getAuthenticatedUser = async (request, db) => {
     });
   }
 
+  const isActive = Number(session.is_active ?? 1) === 1;
+  if (!isActive) {
+    await db.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+    throw new Response(JSON.stringify({ error: "Account is inactive. Please log in again to reactivate." }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  }
+
   const refreshedExpiresAt = nowUnix() + SESSION_TTL_SECONDS;
   await db.prepare("UPDATE sessions SET expires_at = ? WHERE token = ?")
     .bind(refreshedExpiresAt, token)
@@ -358,7 +390,8 @@ const getAuthenticatedUser = async (request, db) => {
       age: session.age ?? null,
       likes: session.likes ?? null,
       dislikes: session.dislikes ?? null,
-      interests: session.interests ?? null
+      interests: session.interests ?? null,
+      is_active: true
     },
     token,
     expires_at: refreshedExpiresAt
@@ -401,20 +434,6 @@ export default {
 
         if (!isValidPassword(password)) {
           return errorResponse("Password must be at least 8 characters", 400);
-        }
-
-        // Check if this identity has been permanently deleted
-        const deletedIdentity = await env.DB.prepare(
-          "SELECT email FROM deleted_identities WHERE email = ?"
-        )
-          .bind(email)
-          .first();
-
-        if (deletedIdentity) {
-          return errorResponse(
-            "This account has been permanently deleted and cannot be recreated.",
-            403
-          );
         }
 
         const existing = await env.DB.prepare(
@@ -465,23 +484,9 @@ export default {
           return errorResponse("email and password are required", 400);
         }
 
-        // Check if this identity has been permanently deleted
-        const deletedIdentity = await env.DB.prepare(
-          "SELECT email FROM deleted_identities WHERE email = ?"
-        )
-          .bind(email)
-          .first();
-
-        if (deletedIdentity) {
-          return errorResponse(
-            "This account has been permanently deleted and cannot be recreated.",
-            403
-          );
-        }
-
         const user = await env.DB.prepare(
           `
-            SELECT id, email, password_hash, display_name, age, likes, dislikes, interests
+            SELECT id, email, password_hash, display_name, age, likes, dislikes, interests, is_active
             FROM users
             WHERE email = ?
           `
@@ -496,6 +501,15 @@ export default {
         const submittedHash = await hashPassword(password);
         if (submittedHash !== user.password_hash) {
           return errorResponse("Invalid email or password", 401);
+        }
+
+        if (Number(user.is_active ?? 1) !== 1) {
+          await env.DB.prepare(
+            "UPDATE users SET is_active = 1, deactivated_at = NULL WHERE id = ?"
+          )
+            .bind(user.id)
+            .run();
+          user.is_active = 1;
         }
 
         const session = await createSession(env.DB, user.id);
@@ -604,43 +618,26 @@ export default {
       if (request.method === "DELETE" && url.pathname === "/profile") {
         const auth = await getAuthenticatedUser(request, env.DB);
         const userId = auth.user.id;
-        const userEmail = auth.user.email.toLowerCase();
+        const deletedAt = nowUnix();
 
         // Delete all user's sessions
         await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?")
           .bind(userId)
           .run();
 
-        // Delete all interest requests made by the user
-        await env.DB.prepare("DELETE FROM interest_requests WHERE requester_user_id = ?")
-          .bind(userId)
-          .run();
-
-        // Delete all interest requests for the user's outings
+        // Mark user as inactive; requests remain visible to hosts.
         await env.DB.prepare(
-          "DELETE FROM interest_requests WHERE outing_id IN (SELECT id FROM outings WHERE host_user_id = ?)"
+          "UPDATE users SET is_active = 0, deactivated_at = ? WHERE id = ?"
         )
+          .bind(deletedAt, userId)
+          .run();
+
+        // Close user's hosted outings so no new activity can be created while inactive.
+        await env.DB.prepare("UPDATE outings SET is_closed = 1 WHERE host_user_id = ?")
           .bind(userId)
           .run();
 
-        // Delete all outings hosted by the user
-        await env.DB.prepare("DELETE FROM outings WHERE host_user_id = ?")
-          .bind(userId)
-          .run();
-
-        // Add email to deleted_identities to prevent reuse
-        await env.DB.prepare(
-          "INSERT OR IGNORE INTO deleted_identities (email, deleted_at) VALUES (?, ?)"
-        )
-          .bind(userEmail, nowUnix())
-          .run();
-
-        // Delete the user record
-        await env.DB.prepare("DELETE FROM users WHERE id = ?")
-          .bind(userId)
-          .run();
-
-        return json({ message: "Account permanently deleted" });
+        return json({ message: "Account deactivated" });
       }
 
       if (
@@ -653,7 +650,7 @@ export default {
 
         const user = await env.DB.prepare(
           `
-            SELECT id, email, display_name, age, likes, dislikes, interests
+            SELECT id, email, display_name, age, likes, dislikes, interests, is_active
             FROM users
             WHERE id = ?
           `
@@ -663,6 +660,10 @@ export default {
 
         if (!user) {
           return errorResponse("User not found", 404);
+        }
+
+        if (Number(user.is_active ?? 1) !== 1) {
+          return errorResponse("User is no longer active", 404);
         }
 
         return json({ user: userPayload(user) }, 200, sessionHeaders(auth.expires_at));
@@ -916,16 +917,34 @@ export default {
 
         const result = await env.DB.prepare(
           `
-            SELECT *
-            FROM interest_requests
-            WHERE outing_id = ?
-            ORDER BY created_at ASC
+            SELECT
+              ir.id,
+              ir.outing_id,
+              ir.requester_user_id,
+              ir.status,
+              ir.created_at,
+              COALESCE(u.is_active, 0) AS requester_is_active
+            FROM interest_requests ir
+            LEFT JOIN users u ON u.id = ir.requester_user_id
+            WHERE ir.outing_id = ?
+            ORDER BY ir.created_at ASC
           `
         )
           .bind(outing_id)
           .all();
 
-        return json(result.results, 200, sessionHeaders(auth.expires_at));
+        const payload = (result.results || []).map((row) => {
+          const isRequesterActive = Number(row.requester_is_active) === 1;
+          return {
+            ...row,
+            requester_is_active: isRequesterActive,
+            inactive_message: isRequesterActive
+              ? null
+              : "This user is no longer active in the system."
+          };
+        });
+
+        return json(payload, 200, sessionHeaders(auth.expires_at));
       }
 
       if (request.method === "POST" && url.pathname === "/interest_requests") {
@@ -1025,6 +1044,35 @@ export default {
 
         if (!["accepted", "rejected"].includes(status)) {
           return errorResponse("status must be 'accepted' or 'rejected'", 400);
+        }
+
+        const requestRecord = await env.DB.prepare(
+          `
+            SELECT
+              ir.id,
+              ir.status,
+              ir.requester_user_id,
+              o.host_user_id,
+              COALESCE(u.is_active, 0) AS requester_is_active
+            FROM interest_requests ir
+            JOIN outings o ON o.id = ir.outing_id
+            LEFT JOIN users u ON u.id = ir.requester_user_id
+            WHERE ir.id = ?
+          `
+        )
+          .bind(interest_request_id)
+          .first();
+
+        if (!requestRecord || requestRecord.host_user_id !== currentUser) {
+          return errorResponse("Not found, forbidden, or already decided", 409);
+        }
+
+        if (requestRecord.status !== "pending") {
+          return errorResponse("Not found, forbidden, or already decided", 409);
+        }
+
+        if (Number(requestRecord.requester_is_active) !== 1) {
+          return errorResponse("Cannot update request because the user is no longer active.", 409);
         }
 
         const result = await env.DB.prepare(
