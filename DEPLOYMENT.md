@@ -100,10 +100,19 @@ wrangler deploy --env production
 ## Post-Deployment Verification
 
 1. Check Worker health: `https://YOUR_WORKER_URL.workers.dev/health`
-2. Test frontend: Open your Pages URL
-3. Create a test account
-4. Create a test outing
-5. Check database: `wrangler d1 execute lets_go_out_prod --command="SELECT COUNT(*) FROM users" --env production`
+2. Check SSE endpoint (authenticated): `https://YOUR_WORKER_URL.workers.dev/events?token=YOUR_SESSION_TOKEN`
+3. Test frontend: Open your Pages URL
+4. Create a test account
+5. Create a test outing
+6. Check database: `wrangler d1 execute lets_go_out_prod --command="SELECT COUNT(*) FROM users" --env production`
+
+## Real-Time Updates (SSE + Fallback)
+
+- Frontend now uses `EventSource` against `/events` for near-real-time outing/request changes.
+- Backend emits `outings-updated` events for outing create/update/close and interest create/decision actions.
+- SSE fanout is in-memory per running Worker instance, so delivery can vary across instances under load.
+- Polling fallback (every 8 seconds while tab is visible) remains enabled to keep UI state eventually consistent.
+- Keep both mechanisms enabled for MVP stability.
 
 ## Performance Monitoring
 

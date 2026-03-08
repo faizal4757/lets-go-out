@@ -151,3 +151,34 @@ window.closeOuting = (outingId) =>
   apiRequest(`/outings/${outingId}/close`, {
     method: "PATCH"
   });
+
+window.openOutingsUpdatesStream = async ({ onConnected, onUpdate, onError } = {}) => {
+  if (!window.currentSessionToken) {
+    throw new Error("Missing session token");
+  }
+
+  const apiBaseUrl = await loadApiBaseUrl();
+  const token = encodeURIComponent(window.currentSessionToken);
+  const streamUrl = `${apiBaseUrl}/events?token=${token}`;
+  const source = new EventSource(streamUrl);
+
+  source.addEventListener("connected", (event) => {
+    if (typeof onConnected === "function") {
+      onConnected(event);
+    }
+  });
+
+  source.addEventListener("outings-updated", (event) => {
+    if (typeof onUpdate === "function") {
+      onUpdate(event);
+    }
+  });
+
+  source.onerror = (event) => {
+    if (typeof onError === "function") {
+      onError(event);
+    }
+  };
+
+  return source;
+};

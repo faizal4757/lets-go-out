@@ -6,6 +6,8 @@ const corsHeaders = {
 };
 
 const SESSION_TTL_SECONDS = 24 * 60 * 60; // 24 hours
+const sseEncoder = new TextEncoder();
+const sseClients = new Map();
 
 const json = (data, status = 200, extraHeaders = {}) =>
   new Response(JSON.stringify(data), {
@@ -18,6 +20,35 @@ const json = (data, status = 200, extraHeaders = {}) =>
   });
 
 const errorResponse = (message, status = 500) => json({ error: message }, status);
+
+const sseEventPayload = (event, data) =>
+  `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+
+const broadcastSse = (event, data) => {
+  if (sseClients.size === 0) {
+    return;
+  }
+
+  const payload = sseEncoder.encode(sseEventPayload(event, data));
+  for (const [clientId, client] of sseClients.entries()) {
+    try {
+      client.controller.enqueue(payload);
+    } catch (_err) {
+      if (client.pingTimerId) {
+        clearInterval(client.pingTimerId);
+      }
+      sseClients.delete(clientId);
+    }
+  }
+};
+
+const notifyOutingsUpdated = (reason, details = {}) => {
+  broadcastSse("outings-updated", {
+    reason,
+    timestamp: nowUnix(),
+    ...details
+  });
+};
 
 const isValidEmail = (email) =>
   /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
@@ -398,6 +429,82 @@ const getAuthenticatedUser = async (request, db) => {
   };
 };
 
+const getAuthenticatedUserFromToken = async (token, db) => {
+  if (!token) {
+    throw new Response(JSON.stringify({ error: "Missing session token" }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  }
+
+  const session = await db.prepare(
+    `
+      SELECT s.user_id, s.expires_at, u.email, u.display_name, u.age, u.likes, u.dislikes, u.interests, u.is_active
+      FROM sessions s
+      JOIN users u ON u.id = s.user_id
+      WHERE s.token = ?
+    `
+  )
+    .bind(token)
+    .first();
+
+  if (!session) {
+    throw new Response(JSON.stringify({ error: "Invalid session token" }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  }
+
+  if (session.expires_at <= nowUnix()) {
+    await db.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+    throw new Response(JSON.stringify({ error: "Session expired" }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  }
+
+  const isActive = Number(session.is_active ?? 1) === 1;
+  if (!isActive) {
+    await db.prepare("DELETE FROM sessions WHERE token = ?").bind(token).run();
+    throw new Response(JSON.stringify({ error: "Account is inactive. Please log in again to reactivate." }), {
+      status: 401,
+      headers: {
+        "Content-Type": "application/json",
+        ...corsHeaders
+      }
+    });
+  }
+
+  const refreshedExpiresAt = nowUnix() + SESSION_TTL_SECONDS;
+  await db.prepare("UPDATE sessions SET expires_at = ? WHERE token = ?")
+    .bind(refreshedExpiresAt, token)
+    .run();
+
+  return {
+    user: {
+      id: session.user_id,
+      email: session.email,
+      display_name: session.display_name,
+      age: session.age ?? null,
+      likes: session.likes ?? null,
+      dislikes: session.dislikes ?? null,
+      interests: session.interests ?? null,
+      is_active: true
+    },
+    token,
+    expires_at: refreshedExpiresAt
+  };
+};
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -416,6 +523,57 @@ export default {
 
       // Initialize schema once per worker instance
       await ensureSchema(env.DB);
+
+      if (request.method === "GET" && url.pathname === "/events") {
+        const token = String(url.searchParams.get("token") || "").trim();
+        const auth = await getAuthenticatedUserFromToken(token, env.DB);
+        const clientId = crypto.randomUUID();
+
+        const stream = new ReadableStream({
+          start(controller) {
+            const pingTimerId = setInterval(() => {
+              try {
+                controller.enqueue(sseEncoder.encode(": ping\n\n"));
+              } catch (_err) {
+                clearInterval(pingTimerId);
+                sseClients.delete(clientId);
+              }
+            }, 15000);
+
+            sseClients.set(clientId, {
+              controller,
+              userId: auth.user.id,
+              pingTimerId
+            });
+
+            controller.enqueue(
+              sseEncoder.encode(
+                sseEventPayload("connected", {
+                  user_id: auth.user.id,
+                  timestamp: nowUnix()
+                })
+              )
+            );
+          },
+          cancel() {
+            const client = sseClients.get(clientId);
+            if (client?.pingTimerId) {
+              clearInterval(client.pingTimerId);
+            }
+            sseClients.delete(clientId);
+          }
+        });
+
+        return new Response(stream, {
+          status: 200,
+          headers: {
+            ...corsHeaders,
+            "Content-Type": "text/event-stream",
+            "Cache-Control": "no-cache, no-transform",
+            Connection: "keep-alive"
+          }
+        });
+      }
 
       if (request.method === "POST" && url.pathname === "/auth/signup") {
 
@@ -736,6 +894,10 @@ export default {
           .bind(title, outing_mode, activity_type, location ?? null, date_time, host_user_id)
           .run();
 
+        notifyOutingsUpdated("outing-created", {
+          host_user_id
+        });
+
         return json({ message: "Outing created" }, 201, sessionHeaders(auth.expires_at));
       }
 
@@ -842,6 +1004,11 @@ export default {
           )
           .run();
 
+        notifyOutingsUpdated("outing-updated", {
+          outing_id,
+          host_user_id
+        });
+
         const updatedOuting = await env.DB.prepare(
           `
             SELECT o.*, u.display_name AS host_display_name
@@ -888,6 +1055,11 @@ export default {
         )
           .bind(outing_id)
           .run();
+
+        notifyOutingsUpdated("outing-closed", {
+          outing_id,
+          host_user_id
+        });
 
         return json({ message: "Outing closed successfully" }, 200, sessionHeaders(auth.expires_at));
       }
@@ -989,6 +1161,11 @@ export default {
           .bind(outing_id, requester_user_id)
           .run();
 
+        notifyOutingsUpdated("interest-expressed", {
+          outing_id,
+          requester_user_id
+        });
+
         return json(
           { outing_id, requester_user_id, status: "pending" },
           201,
@@ -1050,6 +1227,7 @@ export default {
           `
             SELECT
               ir.id,
+              ir.outing_id,
               ir.status,
               ir.requester_user_id,
               o.host_user_id,
@@ -1094,6 +1272,14 @@ export default {
         if (result.changes === 0) {
           return errorResponse("Not found, forbidden, or already decided", 409);
         }
+
+        notifyOutingsUpdated("interest-status-updated", {
+          interest_request_id,
+          outing_id: requestRecord.outing_id,
+          requester_user_id: requestRecord.requester_user_id,
+          host_user_id: currentUser,
+          status
+        });
 
         return json({ id: interest_request_id, status }, 200, sessionHeaders(auth.expires_at));
       }

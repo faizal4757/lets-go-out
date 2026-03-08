@@ -12,6 +12,14 @@ const logoutBtn = document.getElementById("logout-btn");
 
 let myInterestStatusByOuting = {};
 let outingInterestRequestCounts = {};
+let selectedOutingIdForRequests = null;
+let pollingTimerId = null;
+let isSyncInProgress = false;
+let liveUpdatesSource = null;
+let reconnectLiveUpdatesTimerId = null;
+
+const POLL_INTERVAL_MS = 8000;
+const LIVE_RECONNECT_DELAY_MS = 3000;
 
 const STATUS_UI = {
   pending: {
@@ -161,7 +169,7 @@ form.addEventListener("submit", async (event) => {
     await createOuting(payload);
     showSuccess("Outing created successfully.");
     form.reset();
-    await loadOutings();
+    await syncOutingsState();
   } catch (err) {
     showError(err.message);
   }
@@ -178,9 +186,11 @@ logoutBtn.addEventListener("click", async () => {
   redirectToHome();
 });
 
-async function loadOutings() {
+async function loadOutings({ silent = false } = {}) {
   outingsListEl.innerHTML = "";
-  clearError();
+  if (!silent) {
+    clearError();
+  }
 
   try {
     const outings = await getOutings();
@@ -309,7 +319,7 @@ async function loadOutings() {
               try {
                 await updateOuting(outing.id, payload);
                 showSuccess("Outing updated successfully.");
-                await loadOutings();
+                await syncOutingsState();
               } catch (err) {
                 showError(err.message);
               }
@@ -326,7 +336,10 @@ async function loadOutings() {
           buttonRow.appendChild(editBtn);
         }
 
-        const viewBtn = createButton("View requests", () => loadRequests(outing.id));
+        const viewBtn = createButton("View requests", () => {
+          selectedOutingIdForRequests = outing.id;
+          loadRequests(outing.id);
+        });
         buttonRow.appendChild(viewBtn);
 
         if (outing.is_closed === 0) {
@@ -335,8 +348,7 @@ async function loadOutings() {
             try {
               await closeOuting(outing.id);
               showSuccess("Outing closed successfully.");
-              await loadOutings();
-              await loadMyRequests();
+              await syncOutingsState();
             } catch (err) {
               showError(err.message);
             }
@@ -361,7 +373,7 @@ async function loadOutings() {
               interestBtn.textContent = "Awaiting host response";
               interestBtn.disabled = true;
               interestBtn.classList.add("pending");
-              await loadMyRequests();
+              await syncOutingsState();
             } catch (err) {
               showError(err.message);
             }
@@ -382,14 +394,22 @@ async function loadOutings() {
       li.appendChild(buttonRow);
       outingsListEl.appendChild(li);
     });
+    if (selectedOutingIdForRequests && !outings.some((outing) => outing.id === selectedOutingIdForRequests)) {
+      selectedOutingIdForRequests = null;
+      requestsListEl.innerHTML = '<li class="empty-state">Select one of your outings to view interest requests</li>';
+    }
   } catch (err) {
-    showError(err.message);
+    if (!silent) {
+      showError(err.message);
+    }
   }
 }
 
-async function loadRequests(outingId) {
+async function loadRequests(outingId, { silent = false } = {}) {
   requestsListEl.innerHTML = "";
-  clearError();
+  if (!silent) {
+    clearError();
+  }
 
   try {
     const requests = await getInterestRequests(outingId);
@@ -417,8 +437,7 @@ async function loadRequests(outingId) {
           clearError();
           try {
             await updateInterestStatus(req.id, "accepted");
-            await loadRequests(outingId);
-            await loadMyRequests();
+            await syncOutingsState();
           } catch (err) {
             showError(err.message);
           }
@@ -428,8 +447,7 @@ async function loadRequests(outingId) {
           clearError();
           try {
             await updateInterestStatus(req.id, "rejected");
-            await loadRequests(outingId);
-            await loadMyRequests();
+            await syncOutingsState();
           } catch (err) {
             showError(err.message);
           }
@@ -442,13 +460,17 @@ async function loadRequests(outingId) {
       requestsListEl.appendChild(li);
     });
   } catch (err) {
-    showError(err.message);
+    if (!silent) {
+      showError(err.message);
+    }
   }
 }
 
-async function loadMyRequests() {
+async function loadMyRequests({ silent = false } = {}) {
   myRequestsListEl.innerHTML = "";
-  clearError();
+  if (!silent) {
+    clearError();
+  }
 
   try {
     const requests = await getMyInterestRequests();
@@ -487,7 +509,107 @@ async function loadMyRequests() {
       myRequestsListEl.appendChild(li);
     });
   } catch (err) {
-    showError(err.message);
+    if (!silent) {
+      showError(err.message);
+    }
+  }
+}
+
+async function syncOutingsState({ silent = false } = {}) {
+  if (isSyncInProgress) {
+    return;
+  }
+
+  isSyncInProgress = true;
+
+  try {
+    await loadMyRequests({ silent });
+    await loadOutings({ silent });
+
+    if (selectedOutingIdForRequests) {
+      await loadRequests(selectedOutingIdForRequests, { silent });
+    }
+  } finally {
+    isSyncInProgress = false;
+  }
+}
+
+function startPolling() {
+  if (pollingTimerId) {
+    return;
+  }
+
+  pollingTimerId = setInterval(() => {
+    if (document.hidden) {
+      return;
+    }
+
+    syncOutingsState({ silent: true });
+  }, POLL_INTERVAL_MS);
+}
+
+function stopPolling() {
+  if (!pollingTimerId) {
+    return;
+  }
+
+  clearInterval(pollingTimerId);
+  pollingTimerId = null;
+}
+
+function clearLiveReconnectTimer() {
+  if (!reconnectLiveUpdatesTimerId) {
+    return;
+  }
+
+  clearTimeout(reconnectLiveUpdatesTimerId);
+  reconnectLiveUpdatesTimerId = null;
+}
+
+function stopLiveUpdates() {
+  clearLiveReconnectTimer();
+
+  if (!liveUpdatesSource) {
+    return;
+  }
+
+  liveUpdatesSource.close();
+  liveUpdatesSource = null;
+}
+
+function scheduleLiveReconnect() {
+  if (reconnectLiveUpdatesTimerId || document.hidden || !isAuthenticated()) {
+    return;
+  }
+
+  reconnectLiveUpdatesTimerId = setTimeout(() => {
+    reconnectLiveUpdatesTimerId = null;
+    startLiveUpdates();
+  }, LIVE_RECONNECT_DELAY_MS);
+}
+
+async function startLiveUpdates() {
+  if (liveUpdatesSource || !isAuthenticated()) {
+    return;
+  }
+
+  clearLiveReconnectTimer();
+
+  try {
+    liveUpdatesSource = await openOutingsUpdatesStream({
+      onUpdate: () => {
+        syncOutingsState({ silent: true });
+      },
+      onError: () => {
+        if (liveUpdatesSource) {
+          liveUpdatesSource.close();
+          liveUpdatesSource = null;
+        }
+        scheduleLiveReconnect();
+      }
+    });
+  } catch (_err) {
+    scheduleLiveReconnect();
   }
 }
 
@@ -504,8 +626,24 @@ async function initializeOutingsPage() {
   }
 
   requestsListEl.innerHTML = '<li class="empty-state">Select one of your outings to view interest requests</li>';
-  await loadMyRequests();
-  await loadOutings();
+  await syncOutingsState();
+  startPolling();
+  await startLiveUpdates();
 }
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) {
+    syncOutingsState({ silent: true });
+    startLiveUpdates();
+    return;
+  }
+
+  stopLiveUpdates();
+});
+
+window.addEventListener("beforeunload", () => {
+  stopPolling();
+  stopLiveUpdates();
+});
 
 initializeOutingsPage();
