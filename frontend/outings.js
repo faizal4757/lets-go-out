@@ -9,6 +9,8 @@ const currentUserLabel = document.getElementById("current-user-label");
 const hostProfilePanel = document.getElementById("host-profile-panel");
 const hostProfileDetails = document.getElementById("host-profile-details");
 const logoutBtn = document.getElementById("logout-btn");
+const countrySelect = document.getElementById("country");
+const citySelect = document.getElementById("city");
 
 let myInterestStatusByOuting = {};
 let outingInterestRequestCounts = {};
@@ -20,6 +22,13 @@ let reconnectLiveUpdatesTimerId = null;
 
 const POLL_INTERVAL_MS = 8000;
 const LIVE_RECONNECT_DELAY_MS = 3000;
+
+const COUNTRY_CITY_OPTIONS = {
+  USA: ["New York", "San Francisco", "Seattle", "Austin"],
+  Canada: ["Toronto", "Vancouver", "Montreal", "Calgary"],
+  UK: ["London", "Manchester", "Birmingham", "Leeds"],
+  India: ["Mumbai", "Delhi", "Bengaluru", "Pune"]
+};
 
 const STATUS_UI = {
   pending: {
@@ -55,6 +64,103 @@ function showSuccess(message) {
   setTimeout(() => {
     messageEl.classList.add("hidden");
   }, 3000);
+}
+
+function formatOutingLocation(outing) {
+  const country = String(outing.country || "").trim();
+  const city = String(outing.city || "").trim();
+  if (country && city) {
+    return `${city}, ${country}`;
+  }
+
+  return String(outing.location || "").trim();
+}
+
+function populateCountryOptions(selectedCountry = "") {
+  countrySelect.innerHTML = '<option value="">Select country</option>';
+  Object.keys(COUNTRY_CITY_OPTIONS).forEach((country) => {
+    const option = document.createElement("option");
+    option.value = country;
+    option.textContent = country;
+    if (country === selectedCountry) {
+      option.selected = true;
+    }
+    countrySelect.appendChild(option);
+  });
+}
+
+function populateCityOptions(country, selectedCity = "") {
+  citySelect.innerHTML = '<option value="">Select city</option>';
+  const cities = COUNTRY_CITY_OPTIONS[country] || [];
+  cities.forEach((city) => {
+    const option = document.createElement("option");
+    option.value = city;
+    option.textContent = city;
+    if (city === selectedCity) {
+      option.selected = true;
+    }
+    citySelect.appendChild(option);
+  });
+  citySelect.disabled = cities.length === 0;
+}
+
+function createCountryCitySelects(selectedCountry = "", selectedCity = "") {
+  const countryFieldWrap = document.createElement("div");
+  const countryLabel = document.createElement("label");
+  countryLabel.textContent = "Country";
+  const countryBreak = document.createElement("br");
+  const countryField = document.createElement("select");
+  countryField.name = "country";
+  countryField.required = true;
+  countryField.innerHTML = '<option value="">Select country</option>';
+
+  Object.keys(COUNTRY_CITY_OPTIONS).forEach((country) => {
+    const option = document.createElement("option");
+    option.value = country;
+    option.textContent = country;
+    if (country === selectedCountry) {
+      option.selected = true;
+    }
+    countryField.appendChild(option);
+  });
+
+  const cityFieldWrap = document.createElement("div");
+  const cityLabel = document.createElement("label");
+  cityLabel.textContent = "City";
+  const cityBreak = document.createElement("br");
+  const cityField = document.createElement("select");
+  cityField.name = "city";
+  cityField.required = true;
+
+  const setCityOptions = (country, city = "") => {
+    cityField.innerHTML = '<option value="">Select city</option>';
+    const cities = COUNTRY_CITY_OPTIONS[country] || [];
+    cities.forEach((cityOption) => {
+      const option = document.createElement("option");
+      option.value = cityOption;
+      option.textContent = cityOption;
+      if (cityOption === city) {
+        option.selected = true;
+      }
+      cityField.appendChild(option);
+    });
+    cityField.disabled = cities.length === 0;
+  };
+
+  setCityOptions(selectedCountry, selectedCity);
+  countryField.addEventListener("change", () => {
+    setCityOptions(countryField.value, "");
+  });
+
+  countryFieldWrap.append(countryLabel, countryBreak, countryField);
+  cityFieldWrap.append(cityLabel, cityBreak, cityField);
+
+  return {
+    countryFieldWrap,
+    cityFieldWrap,
+    countryField,
+    cityField
+  };
 }
 
 function createButton(label, onClick, className) {
@@ -158,17 +264,27 @@ form.addEventListener("submit", async (event) => {
     return;
   }
 
+  const country = countrySelect.value;
+  const city = citySelect.value;
+  if (!country || !city) {
+    showError("Please select both country and city.");
+    return;
+  }
+
   const payload = {
     title: document.getElementById("title").value,
     activity_type: document.getElementById("type").value,
     date_time: unixDate,
-    location: document.getElementById("location").value
+    country,
+    city
   };
 
   try {
     await createOuting(payload);
     showSuccess("Outing created successfully.");
     form.reset();
+    populateCountryOptions();
+    populateCityOptions("");
     await syncOutingsState();
   } catch (err) {
     showError(err.message);
@@ -217,7 +333,8 @@ async function loadOutings({ silent = false } = {}) {
       const li = document.createElement("li");
 
       const titleRow = document.createElement("div");
-      titleRow.textContent = `${outing.title} | ${outing.activity_type} | Host: ${outing.host_display_name || outing.host_user_id}`;
+      const locationLabel = formatOutingLocation(outing);
+      titleRow.textContent = `${outing.title} | ${outing.activity_type} | ${locationLabel} | Host: ${outing.host_display_name || outing.host_user_id}`;
       li.appendChild(titleRow);
 
       const buttonRow = document.createElement("div");
@@ -281,21 +398,16 @@ async function loadOutings({ silent = false } = {}) {
             dateInput.value = toDateTimeLocalValue(outing.date_time);
             dateWrap.append(dateLabel, dateBreak, dateInput);
 
-            const locationWrap = document.createElement("div");
-            const locationLabel = document.createElement("label");
-            locationLabel.textContent = "Location";
-            const locationBreak = document.createElement("br");
-            const locationInput = document.createElement("input");
-            locationInput.type = "text";
-            locationInput.name = "location";
-            locationInput.value = outing.location || "";
-            locationWrap.append(locationLabel, locationBreak, locationInput);
+            const { countryFieldWrap, cityFieldWrap } = createCountryCitySelects(
+              outing.country || "",
+              outing.city || ""
+            );
 
             const saveButton = document.createElement("button");
             saveButton.type = "submit";
             saveButton.textContent = "Save changes";
 
-            editForm.append(titleWrap, typeWrap, dateWrap, locationWrap, saveButton);
+            editForm.append(titleWrap, typeWrap, dateWrap, countryFieldWrap, cityFieldWrap, saveButton);
 
             editForm.addEventListener("submit", async (event) => {
               event.preventDefault();
@@ -313,8 +425,14 @@ async function loadOutings({ silent = false } = {}) {
                 title: String(formData.get("title") || "").trim(),
                 activity_type: String(formData.get("activity_type") || "").trim(),
                 date_time: unixDate,
-                location: String(formData.get("location") || "").trim()
+                country: String(formData.get("country") || "").trim(),
+                city: String(formData.get("city") || "").trim()
               };
+
+              if (!payload.country || !payload.city) {
+                showError("Please select both country and city.");
+                return;
+              }
 
               try {
                 await updateOuting(outing.id, payload);
@@ -487,6 +605,8 @@ async function loadMyRequests({ silent = false } = {}) {
     requests.forEach((req) => {
       const li = document.createElement("li");
       const ui = STATUS_UI[req.status];
+      const requestLocationLabel =
+        req.country && req.city ? `${req.city}, ${req.country}` : "Location pending";
 
       let closedNote = "";
       if (req.is_closed === 1) {
@@ -501,7 +621,7 @@ async function loadMyRequests({ silent = false } = {}) {
 
       li.innerHTML = `
         <strong>${req.title}</strong><br/>
-        ${req.activity_type} | ${req.location || ""}<br/>
+        ${req.activity_type} | ${requestLocationLabel}<br/>
         <span class="${ui.className}">${ui.label}: ${ui.message}</span>
         ${closedNote ? `<div class="closed-note ${req.status}-note">${closedNote}</div>` : ""}
       `;
@@ -619,6 +739,11 @@ window.addEventListener("session-expired", () => {
 
 async function initializeOutingsPage() {
   hideHostProfilePanel();
+  populateCountryOptions();
+  populateCityOptions("");
+  countrySelect.addEventListener("change", () => {
+    populateCityOptions(countrySelect.value);
+  });
 
   const authenticated = await guardAuthenticatedPage();
   if (!authenticated) {
