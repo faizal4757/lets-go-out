@@ -66,6 +66,19 @@ button:disabled {
   border-radius: 8px;
 }
 
+.top-bar {
+  margin-bottom: 12px;
+}
+
+.site-nav {
+  margin-bottom: 16px;
+}
+
+.site-nav a {
+  color: inherit;
+  margin-right: 12px;
+}
+
 /* ------------------------------
    Button states
 ------------------------------ */

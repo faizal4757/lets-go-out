@@ -27,3 +27,11 @@ lets-go-out is a platform where users can host an outing or activity and others 
 ## Status
 Backend MVP deployed to Cloudflare Workers with D1.
 Health check live.
+
+## Frontend Structure
+- Framework-free multi-page frontend in `frontend/`
+- Entry pages:
+	- `home.html` (landing + auth)
+	- `outings.html` (outing discovery and requests)
+	- `profile.html` (profile management)
+- `index.html` redirects to `home.html` for root compatibility

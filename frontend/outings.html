@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Lets Go Out | Outings</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <h1>Lets Go Out</h1>
+
+  <p id="global-error" class="error hidden"></p>
+  <p id="message" class="success hidden"></p>
+
+  <div class="top-bar">
+    <strong>Current User:</strong>
+    <span id="current-user-label"></span>
+    <button id="logout-btn" type="button">Log out</button>
+  </div>
+
+  <nav class="site-nav">
+    <a href="home.html">Home</a>
+    <a href="outings.html">Outings</a>
+    <a href="profile.html">Profile</a>
+  </nav>
+
+  <hr />
+
+  <h2>Create an outing</h2>
+  <form id="create-outing-form">
+    <div>
+      <label>Title</label><br />
+      <input type="text" id="title" required />
+    </div>
+    <div>
+      <label>Type</label><br />
+      <select id="type">
+        <option value="movie">Movie</option>
+        <option value="coffee">Coffee</option>
+        <option value="sports">Sports</option>
+      </select>
+    </div>
+    <div>
+      <label>Date and Time</label><br />
+      <input type="datetime-local" id="date_time" required />
+    </div>
+    <div>
+      <label>Location</label><br />
+      <input type="text" id="location" />
+    </div>
+    <button type="submit">Create Outing</button>
+  </form>
+
+  <hr />
+
+  <h2>Available outings</h2>
+  <ul id="outings-list"></ul>
+
+  <section id="host-profile-panel" class="hidden">
+    <h3>Host profile</h3>
+    <p id="host-profile-details"></p>
+  </section>
+
+  <hr />
+
+  <h2>Interest requests (for my outings)</h2>
+  <ul id="requests-list">
+    <li class="empty-state">Select one of your outings to view interest requests</li>
+  </ul>
+
+  <hr />
+
+  <h2>My interest requests</h2>
+  <ul id="my-requests-list">
+    <li class="empty-state">You haven't expressed interest in any outings yet. Browse the available outings above!</li>
+  </ul>
+
+  <script src="state.js"></script>
+  <script src="api.js"></script>
+  <script src="outings.js"></script>
+</body>
+</html>

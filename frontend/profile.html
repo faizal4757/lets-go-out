@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Lets Go Out | Profile</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <h1>Lets Go Out</h1>
+
+  <p id="global-error" class="error hidden"></p>
+  <p id="message" class="success hidden"></p>
+
+  <div class="top-bar">
+    <strong>Current User:</strong>
+    <span id="current-user-label"></span>
+    <button id="logout-btn" type="button">Log out</button>
+  </div>
+
+  <nav class="site-nav">
+    <a href="home.html">Home</a>
+    <a href="outings.html">Outings</a>
+    <a href="profile.html">Profile</a>
+  </nav>
+
+  <hr />
+
+  <h2>My profile</h2>
+  <form id="profile-form">
+    <div>
+      <label>Name</label><br />
+      <input type="text" id="profile-display-name" required />
+    </div>
+    <div>
+      <label>Email</label><br />
+      <input type="email" id="profile-email" disabled />
+    </div>
+    <div>
+      <label>Age</label><br />
+      <input type="number" id="profile-age" min="0" max="120" />
+    </div>
+    <div>
+      <label>Likes</label><br />
+      <input type="text" id="profile-likes" />
+    </div>
+    <div>
+      <label>Dislikes</label><br />
+      <input type="text" id="profile-dislikes" />
+    </div>
+    <div>
+      <label>Interests</label><br />
+      <input type="text" id="profile-interests" />
+    </div>
+    <button type="submit">Save profile</button>
+  </form>
+
+  <div class="danger-zone">
+    <h3>Danger Zone</h3>
+    <p>Once you delete your account, there is no going back. Your email will be permanently blocked and cannot be reused.</p>
+    <button id="delete-account-btn" type="button" class="danger-button">Delete Account Permanently</button>
+  </div>
+
+  <script src="state.js"></script>
+  <script src="api.js"></script>
+  <script src="profile.js"></script>
+</body>
+</html>

@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Lets Go Out | Home</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <h1>Lets Go Out</h1>
+
+  <p id="global-error" class="error hidden"></p>
+  <p id="message" class="success hidden"></p>
+
+  <section id="guest-home" class="auth-section hidden">
+    <h2>Welcome</h2>
+    <p>Sign up or log in to view outings and manage your profile.</p>
+
+    <div class="auth-toggle">
+      <button id="show-signup-btn" type="button">Sign up</button>
+      <button id="show-login-btn" type="button">Log in</button>
+    </div>
+
+    <form id="signup-form" class="auth-form">
+      <h3>Sign up</h3>
+      <div>
+        <label>Email</label><br />
+        <input type="email" id="signup-email" required />
+      </div>
+      <div>
+        <label>Password</label><br />
+        <input type="password" id="signup-password" minlength="8" required />
+      </div>
+      <div>
+        <label>Display name (optional)</label><br />
+        <input type="text" id="signup-display-name" />
+      </div>
+      <button type="submit">Create account</button>
+    </form>
+
+    <form id="login-form" class="auth-form hidden">
+      <h3>Log in</h3>
+      <div>
+        <label>Email</label><br />
+        <input type="email" id="login-email" required />
+      </div>
+      <div>
+        <label>Password</label><br />
+        <input type="password" id="login-password" required />
+      </div>
+      <button type="submit">Log in</button>
+    </form>
+  </section>
+
+  <section id="member-home" class="hidden">
+    <div class="top-bar">
+      <strong>Current User:</strong>
+      <span id="current-user-label"></span>
+      <button id="logout-btn" type="button">Log out</button>
+    </div>
+
+    <nav class="site-nav">
+      <a href="home.html">Home</a>
+      <a href="outings.html">Outings</a>
+      <a href="profile.html">Profile</a>
+    </nav>
+
+    <p>Use the navigation links above to continue.</p>
+  </section>
+
+  <script src="state.js"></script>
+  <script src="api.js"></script>
+  <script src="home.js"></script>
+</body>
+</html>
