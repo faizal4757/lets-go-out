@@ -42,6 +42,7 @@ CREATE TABLE IF NOT EXISTS outings (
   activity_type TEXT NOT NULL,
   country TEXT NOT NULL,
   city TEXT NOT NULL,
+  venue_area TEXT,
   virtual_link TEXT,
   date_time INTEGER NOT NULL,
   host_user_id TEXT NOT NULL,

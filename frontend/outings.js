@@ -11,6 +11,7 @@ const hostProfileDetails = document.getElementById("host-profile-details");
 const logoutBtn = document.getElementById("logout-btn");
 const countrySelect = document.getElementById("country");
 const citySelect = document.getElementById("city");
+const venueAreaInput = document.getElementById("venue_area");
 
 let myInterestStatusByOuting = {};
 let outingInterestRequestCounts = {};
@@ -66,14 +67,35 @@ function showSuccess(message) {
   }, 3000);
 }
 
-function formatOutingLocation(outing) {
+function getLocationDetails(outing) {
   const country = String(outing.country || "").trim();
   const city = String(outing.city || "").trim();
-  if (country && city) {
-    return `${city}, ${country}`;
+  const venueArea = String(outing.venue_area || "").trim();
+
+  return {
+    primary: `${city}, ${country}`,
+    secondary: venueArea
+  };
+}
+
+function appendLocationBlock(targetEl, outing) {
+  const location = getLocationDetails(outing);
+  const locationWrap = document.createElement("div");
+  locationWrap.className = "location-block";
+
+  const primaryLine = document.createElement("div");
+  primaryLine.className = "location-primary";
+  primaryLine.textContent = location.primary;
+  locationWrap.appendChild(primaryLine);
+
+  if (location.secondary) {
+    const secondaryLine = document.createElement("div");
+    secondaryLine.className = "location-secondary";
+    secondaryLine.textContent = location.secondary;
+    locationWrap.appendChild(secondaryLine);
   }
 
-  return String(outing.location || "").trim();
+  targetEl.appendChild(locationWrap);
 }
 
 function populateCountryOptions(selectedCountry = "") {
@@ -276,7 +298,8 @@ form.addEventListener("submit", async (event) => {
     activity_type: document.getElementById("type").value,
     date_time: unixDate,
     country,
-    city
+    city,
+    venue_area: venueAreaInput.value.trim()
   };
 
   try {
@@ -333,9 +356,9 @@ async function loadOutings({ silent = false } = {}) {
       const li = document.createElement("li");
 
       const titleRow = document.createElement("div");
-      const locationLabel = formatOutingLocation(outing);
-      titleRow.textContent = `${outing.title} | ${outing.activity_type} | ${locationLabel} | Host: ${outing.host_display_name || outing.host_user_id}`;
+      titleRow.textContent = `${outing.title} | ${outing.activity_type} | Host: ${outing.host_display_name || outing.host_user_id}`;
       li.appendChild(titleRow);
+      appendLocationBlock(li, outing);
 
       const buttonRow = document.createElement("div");
       buttonRow.className = "button-row";
@@ -403,11 +426,21 @@ async function loadOutings({ silent = false } = {}) {
               outing.city || ""
             );
 
+            const venueWrap = document.createElement("div");
+            const venueLabel = document.createElement("label");
+            venueLabel.textContent = "Venue / Area (optional)";
+            const venueBreak = document.createElement("br");
+            const venueInput = document.createElement("input");
+            venueInput.type = "text";
+            venueInput.name = "venue_area";
+            venueInput.value = outing.venue_area || "";
+            venueWrap.append(venueLabel, venueBreak, venueInput);
+
             const saveButton = document.createElement("button");
             saveButton.type = "submit";
             saveButton.textContent = "Save changes";
 
-            editForm.append(titleWrap, typeWrap, dateWrap, countryFieldWrap, cityFieldWrap, saveButton);
+            editForm.append(titleWrap, typeWrap, dateWrap, countryFieldWrap, cityFieldWrap, venueWrap, saveButton);
 
             editForm.addEventListener("submit", async (event) => {
               event.preventDefault();
@@ -426,7 +459,8 @@ async function loadOutings({ silent = false } = {}) {
                 activity_type: String(formData.get("activity_type") || "").trim(),
                 date_time: unixDate,
                 country: String(formData.get("country") || "").trim(),
-                city: String(formData.get("city") || "").trim()
+                city: String(formData.get("city") || "").trim(),
+                venue_area: String(formData.get("venue_area") || "").trim()
               };
 
               if (!payload.country || !payload.city) {
@@ -605,8 +639,7 @@ async function loadMyRequests({ silent = false } = {}) {
     requests.forEach((req) => {
       const li = document.createElement("li");
       const ui = STATUS_UI[req.status];
-      const requestLocationLabel =
-        req.country && req.city ? `${req.city}, ${req.country}` : "Location pending";
+      const location = getLocationDetails(req);
 
       let closedNote = "";
       if (req.is_closed === 1) {
@@ -621,7 +654,9 @@ async function loadMyRequests({ silent = false } = {}) {
 
       li.innerHTML = `
         <strong>${req.title}</strong><br/>
-        ${req.activity_type} | ${requestLocationLabel}<br/>
+        ${req.activity_type}<br/>
+        <span class="location-primary">${location.primary}</span>
+        ${location.secondary ? `<div class="location-secondary">${location.secondary}</div>` : ""}
         <span class="${ui.className}">${ui.label}: ${ui.message}</span>
         ${closedNote ? `<div class="closed-note ${req.status}-note">${closedNote}</div>` : ""}
       `;

@@ -238,6 +238,7 @@ const ensureOutingsSchema = async (db) => {
           activity_type TEXT NOT NULL,
           country TEXT NOT NULL,
           city TEXT NOT NULL,
+          venue_area TEXT,
           virtual_link TEXT,
           date_time INTEGER NOT NULL,
           host_user_id TEXT NOT NULL,
@@ -262,6 +263,10 @@ const ensureOutingsSchema = async (db) => {
 
     if (!columns.has("city")) {
       await db.prepare("ALTER TABLE outings ADD COLUMN city TEXT").run();
+    }
+
+    if (!columns.has("venue_area")) {
+      await db.prepare("ALTER TABLE outings ADD COLUMN venue_area TEXT").run();
     }
 
     await db.prepare(
@@ -889,6 +894,7 @@ export default {
         const activity_type = String(body.activity_type || "").trim();
         const country = String(body.country || "").trim();
         const city = String(body.city || "").trim();
+        const venue_area = normalizeOptionalText(body.venue_area);
         const date_time = Number(body.date_time);
         const outing_mode = "in_person";
 
@@ -906,6 +912,7 @@ export default {
               activity_type,
               country,
               city,
+              venue_area,
               virtual_link,
               date_time,
               host_user_id,
@@ -915,11 +922,11 @@ export default {
             )
             VALUES (
               lower(hex(randomblob(16))),
-              ?, NULL, ?, ?, ?, ?, NULL, ?, ?, 'open', 0, strftime('%s','now')
+              ?, NULL, ?, ?, ?, ?, ?, NULL, ?, ?, 'open', 0, strftime('%s','now')
             )
           `
         )
-          .bind(title, outing_mode, activity_type, country, city, date_time, host_user_id)
+          .bind(title, outing_mode, activity_type, country, city, venue_area, date_time, host_user_id)
           .run();
 
         notifyOutingsUpdated("outing-created", {
@@ -948,13 +955,16 @@ export default {
           body.country === undefined ? undefined : String(body.country).trim();
         const nextCity =
           body.city === undefined ? undefined : String(body.city).trim();
+        const nextVenueArea =
+          body.venue_area === undefined ? undefined : normalizeOptionalText(body.venue_area);
 
         const hasAtLeastOneField =
           body.title !== undefined ||
           body.activity_type !== undefined ||
           body.date_time !== undefined ||
           body.country !== undefined ||
-          body.city !== undefined;
+          body.city !== undefined ||
+          body.venue_area !== undefined;
 
         if (!hasAtLeastOneField) {
           return errorResponse("At least one editable field is required", 400);
@@ -1019,6 +1029,7 @@ export default {
         const shouldUpdateDateTime = body.date_time !== undefined;
         const shouldUpdateCountry = body.country !== undefined;
         const shouldUpdateCity = body.city !== undefined;
+        const shouldUpdateVenueArea = body.venue_area !== undefined;
 
         await env.DB.prepare(
           `
@@ -1028,7 +1039,8 @@ export default {
               activity_type = CASE WHEN ? THEN ? ELSE activity_type END,
               date_time = CASE WHEN ? THEN ? ELSE date_time END,
               country = CASE WHEN ? THEN ? ELSE country END,
-              city = CASE WHEN ? THEN ? ELSE city END
+              city = CASE WHEN ? THEN ? ELSE city END,
+              venue_area = CASE WHEN ? THEN ? ELSE venue_area END
             WHERE id = ?
           `
         )
@@ -1043,6 +1055,8 @@ export default {
             nextCountry,
             shouldUpdateCity ? 1 : 0,
             nextCity,
+            shouldUpdateVenueArea ? 1 : 0,
+            nextVenueArea,
             outing_id
           )
           .run();
@@ -1233,6 +1247,7 @@ export default {
                 o.date_time,
                 o.country,
                 o.city,
+                o.venue_area,
                 o.is_closed
               FROM interest_requests ir
               JOIN outings o ON ir.outing_id = o.id

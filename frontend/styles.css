@@ -133,6 +133,18 @@ li {
   margin-top: 6px;
 }
 
+.location-block {
+  margin-top: 4px;
+}
+
+.location-primary {
+  font-weight: 600;
+}
+
+.location-secondary {
+  margin-top: 2px;
+}
+
 .button-row button:first-child {
   margin-left: 0;
 }
