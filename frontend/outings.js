@@ -11,7 +11,86 @@ const hostProfileDetails = document.getElementById("host-profile-details");
 const logoutBtn = document.getElementById("logout-btn");
 const countrySelect = document.getElementById("country");
 const citySelect = document.getElementById("city");
+
+const datePicker = document.getElementById("date_picker");
+const timeSlotPicker = document.getElementById("time_slot_picker");
 const venueAreaInput = document.getElementById("venue_area");
+
+function pad2(n) {
+  return n < 10 ? "0" + n : "" + n;
+}
+
+function getTodayDateStr() {
+  const now = new Date();
+  return `${now.getFullYear()}-${pad2(now.getMonth() + 1)}-${pad2(now.getDate())}`;
+}
+
+function populateDatePicker() {
+  const todayStr = getTodayDateStr();
+  datePicker.min = todayStr;
+  datePicker.value = todayStr;
+}
+
+function getTimeSlotsForDate(dateStr) {
+  const slots = [];
+  const now = new Date();
+  const selectedDate = new Date(dateStr + 'T00:00');
+  let startHour = 0;
+  let startMinute = 0;
+  if (
+    now.getFullYear() === selectedDate.getFullYear() &&
+    now.getMonth() === selectedDate.getMonth() &&
+    now.getDate() === selectedDate.getDate()
+  ) {
+    // Today: start from next 30-min interval after now
+    startHour = now.getHours();
+    startMinute = now.getMinutes();
+    let nextSlot = new Date(now.getTime());
+    nextSlot.setSeconds(0, 0);
+    if (startMinute < 30) {
+      nextSlot.setMinutes(30);
+    } else {
+      nextSlot.setHours(startHour + 1);
+      nextSlot.setMinutes(0);
+    }
+    startHour = nextSlot.getHours();
+    startMinute = nextSlot.getMinutes();
+  }
+  for (let h = startHour; h < 24; h++) {
+    for (let m = (h === startHour ? startMinute : 0); m < 60; m += 30) {
+      slots.push(`${pad2(h)}:${pad2(m)}`);
+    }
+  }
+  return slots;
+}
+
+function populateTimeSlotPicker() {
+  const dateStr = datePicker.value;
+  const slots = getTimeSlotsForDate(dateStr);
+  timeSlotPicker.innerHTML = '<option value="">Select time</option>';
+  slots.forEach((slot) => {
+    const option = document.createElement('option');
+    option.value = slot;
+    // Display in block format (e.g., 1:00, 1:30, ...)
+    let [h, m] = slot.split(":");
+    let hour = parseInt(h, 10);
+    let ampm = hour >= 12 ? "PM" : "AM";
+    let displayHour = hour % 12;
+    if (displayHour === 0) displayHour = 12;
+    option.textContent = `${displayHour}:${m} ${ampm}`;
+    timeSlotPicker.appendChild(option);
+  });
+  timeSlotPicker.disabled = slots.length === 0;
+}
+
+if (datePicker && timeSlotPicker) {
+  populateDatePicker();
+  populateTimeSlotPicker();
+  datePicker.addEventListener('change', populateTimeSlotPicker);
+  // Prevent manual typing in date and time slot pickers
+  datePicker.addEventListener('keydown', (e) => e.preventDefault());
+  timeSlotPicker.addEventListener('keydown', (e) => e.preventDefault());
+}
 
 let myInterestStatusByOuting = {};
 let outingInterestRequestCounts = {};
@@ -278,11 +357,18 @@ form.addEventListener("submit", async (event) => {
   event.preventDefault();
   clearError();
 
-  const rawDate = document.getElementById("date_time").value;
-  const unixDate = Math.floor(new Date(rawDate).getTime() / 1000);
-
-  if (!Number.isFinite(unixDate)) {
-    showError("Please provide a valid date and time.");
+  const dateStr = datePicker.value;
+  const timeStr = timeSlotPicker.value;
+  if (!dateStr || !timeStr) {
+    showError("Please select a valid date and time slot.");
+    return;
+  }
+  // Compose ISO string and get unix timestamp
+  const dateTimeStr = `${dateStr}T${timeStr}`;
+  const unixDate = Math.floor(new Date(dateTimeStr).getTime() / 1000);
+  const nowUnix = Math.floor(Date.now() / 1000);
+  if (!Number.isFinite(unixDate) || unixDate <= nowUnix) {
+    showError("Please select a future date and time slot.");
     return;
   }
 
@@ -308,6 +394,8 @@ form.addEventListener("submit", async (event) => {
     form.reset();
     populateCountryOptions();
     populateCityOptions("");
+    populateDatePicker();
+    populateTimeSlotPicker();
     await syncOutingsState();
   } catch (err) {
     showError(err.message);

@@ -41,7 +41,19 @@
     </div>
     <div>
       <label>Date and Time</label><br />
-      <input type="datetime-local" id="date_time" required />
+      <label>Date</label><br />
+      <input type="date" id="date_picker" required />
+      <br />
+      <style>
+        /* Prevent manual typing in date and time slot pickers */
+        input[type="date"], select#time_slot_picker {
+          ime-mode: disabled;
+        }
+      </style>
+      <label>Time Slot</label><br />
+      <select id="time_slot_picker" required>
+        <option value="">Select time</option>
+      </select>
     </div>
     <div>
       <label>Country</label><br />
