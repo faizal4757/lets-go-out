@@ -1,0 +1,49 @@
+/* Navigation bar styles for desktop and mobile */
+.site-nav {
+  display: flex;
+  gap: 1.5rem;
+  background: #f8f8f8;
+  padding: 0.75rem 1rem;
+  border-radius: 0.5rem;
+  margin: 1rem 0;
+  align-items: center;
+}
+.site-nav a {
+  text-decoration: none;
+  color: #333;
+  font-weight: 500;
+  padding: 0.5rem 1rem;
+  border-radius: 0.25rem;
+  transition: background 0.2s, color 0.2s;
+}
+.site-nav a.active {
+  background: #0078d4;
+  color: #fff;
+}
+.site-nav .nav-spacer {
+  flex: 1;
+}
+
+/* Mobile styles */
+@media (max-width: 700px) {
+  .site-nav {
+    position: fixed;
+    left: 0; right: 0; bottom: 0;
+    top: auto;
+    background: #fff;
+    border-top: 1px solid #ddd;
+    border-radius: 0;
+    justify-content: space-around;
+    z-index: 1000;
+    margin: 0;
+    padding: 0.5rem 0;
+  }
+  .site-nav a {
+    flex: 1;
+    text-align: center;
+    padding: 0.75rem 0.25rem;
+    font-size: 1.1rem;
+    border-radius: 0;
+    background: none;
+  }
+}

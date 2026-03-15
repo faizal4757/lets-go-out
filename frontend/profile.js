@@ -1,3 +1,22 @@
+// Navigation active link highlighting and logout
+function setActiveNav() {
+  const navLinks = document.querySelectorAll('.site-nav a');
+  const path = window.location.pathname.split('/').pop();
+  navLinks.forEach(link => {
+    link.classList.remove('active');
+    if (link.id === 'nav-profile' && path === 'profile.html') link.classList.add('active');
+    if (link.id === 'nav-discover' && path === 'outings.html') link.classList.add('active');
+  });
+}
+setActiveNav();
+
+const navLogout = document.getElementById('nav-logout');
+if (navLogout) {
+  navLogout.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (logoutBtn) logoutBtn.click();
+  });
+}
 const profileForm = document.getElementById("profile-form");
 const profileDisplayNameInput = document.getElementById("profile-display-name");
 const profileEmailInput = document.getElementById("profile-email");

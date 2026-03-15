@@ -1,3 +1,26 @@
+// Navigation active link highlighting and logout
+function setActiveNav() {
+  const navLinks = document.querySelectorAll('.site-nav a');
+  const path = window.location.pathname.split('/').pop();
+  const hash = window.location.hash;
+  navLinks.forEach(link => {
+    link.classList.remove('active');
+    if (link.id === 'nav-discover' && path === 'outings.html' && !hash) link.classList.add('active');
+    if (link.id === 'nav-create' && path === 'outings.html' && hash === '#create') link.classList.add('active');
+    if (link.id === 'nav-my' && path === 'outings.html' && hash === '#my') link.classList.add('active');
+    if (link.id === 'nav-profile' && path === 'profile.html') link.classList.add('active');
+  });
+}
+setActiveNav();
+window.addEventListener('hashchange', setActiveNav);
+
+const navLogout = document.getElementById('nav-logout');
+if (navLogout) {
+  navLogout.addEventListener('click', async (e) => {
+    e.preventDefault();
+    if (logoutBtn) logoutBtn.click();
+  });
+}
 const form = document.getElementById("create-outing-form");
 const messageEl = document.getElementById("message");
 const errorEl = document.getElementById("global-error");
